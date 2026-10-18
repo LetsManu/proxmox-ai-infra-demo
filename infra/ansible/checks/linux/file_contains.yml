@@ -1,0 +1,9 @@
+- name: Read file
+  ansible.builtin.slurp:
+    src: "{{ check.path }}"
+  register: r
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.content is defined and (r.content | b64decode) is search(check.pattern) }}"
+    check_detail: "{{ check.path }} {{ 'matches' if r.content is defined and (r.content | b64decode) is search(check.pattern) else ('does not match' if r.content is defined else 'is missing') }}"

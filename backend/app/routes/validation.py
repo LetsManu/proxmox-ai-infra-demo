@@ -7,7 +7,8 @@ from fastapi import APIRouter, HTTPException
 from ..config import get_settings
 from ..database import session_scope
 from ..models import JobStatus, VirtualMachine
-from ..schemas import JobCreated, ValidateRequest
+from ..schemas import DraftTestsRequest, JobCreated, ValidateRequest
+from ..services import ai_service, test_service
 from ..services.template_service import os_family_for
 from ..services.validation_service import finish, validate_vm
 from ..workers.job_runner import JobContext, JobOutcome, create_job, submit
@@ -31,6 +32,14 @@ def validate(req: ValidateRequest):
         result = validate_vm(s, vmid=vm.vmid, env=req.environment, health_check_port=req.health_check_port,
                              health_check_path=req.health_check_path, simulate_failure=req.simulate_failure,
                              log=ctx.log, os_family=os_family)
+        tests = test_service.run_suite(s, vm_name=req.name, env=req.environment, spec=vm.spec, os_family=os_family,
+                                       ip=result["ip_address"], job_id=ctx.job_id, log=ctx.log,
+                                       mock=not s.live_mode, fail=req.simulate_failure or s.mock_fail_validation)
+        for group, label in (("security_baseline", "Security baseline"), ("app_tests", "Application tests")):
+            result["checks"].append({"name": group, "ok": tests["summary"][group]["ok"],
+                                     "detail": f"{label}: {tests['summary'][group]['detail']}"})
+        result["tests"] = tests["results"]
+        result["tests_reviewed"] = tests["approved"]
         current = get_vm(req.name, req.environment)
         result = finish(result, config_status=current.config_status,
                         profiles=(vm.spec.get("profiles") or []) + (vm.spec.get("packages") or []), log=ctx.log)
@@ -48,3 +57,25 @@ def validate(req: ValidateRequest):
 
     submit(job_id, work)
     return JobCreated(job_id=job_id, status="queued")
+
+
+@router.get("/vms/tests")
+def get_suite(name: str, environment: str = "test"):
+    """The checks Validate will run for this VM, and whether they were reviewed."""
+    s = get_settings()
+    vm = get_vm(name, environment)
+    if not vm:
+        raise HTTPException(404, f"VM '{name}' is not deployed in {environment}.")
+    suite = test_service.build_suite(s, name, vm.spec, os_family_for(vm.spec.get("template", "")))
+    return {**suite, "suite": test_service.suite_key(name)}
+
+
+@router.post("/vms/tests/draft")
+def draft_tests(req: DraftTestsRequest):
+    """Draft application tests (AI or rules). They are used only after a person approves them."""
+    s = get_settings()
+    vm = get_vm(req.name, req.environment)
+    if not vm:
+        raise HTTPException(404, f"VM '{req.name}' is not deployed in {req.environment}.")
+    ai_call = ai_service.ai_caller(s, f"Write acceptance tests for VM {req.name}.") if s.ai_enabled else None
+    return test_service.draft_suite(s, vm_name=req.name, spec=vm.spec, ai_call=ai_call, user=s.app_user)

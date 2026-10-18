@@ -1,0 +1,8 @@
+- name: Query feature
+  ansible.windows.win_feature_info:
+    name: "{{ check.feature }}"
+  register: r
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.exists and r.features[0].installed }}"
+    check_detail: "{{ check.feature }} {{ 'installed' if r.exists and r.features[0].installed else 'not installed' }}"

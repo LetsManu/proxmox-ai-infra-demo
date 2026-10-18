@@ -1,0 +1,9 @@
+- name: List listening TCP sockets
+  ansible.builtin.command: ["ss", "-Htln"]
+  register: r
+  changed_when: false
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.stdout_lines | select('search', ':' ~ check.port ~ '\\s') | list | length > 0 }}"
+    check_detail: "tcp/{{ check.port }} {{ 'listening' if r.stdout_lines | select('search', ':' ~ check.port ~ '\\s') | list | length > 0 else 'not listening' }}"

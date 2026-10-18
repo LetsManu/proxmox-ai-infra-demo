@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..config import ENVIRONMENTS, TEMPLATE_CATALOG, Settings, template_entry
+from . import software_service
 from .profile_service import load_profiles
 from ..schemas import VmSpec
 
@@ -58,6 +59,11 @@ def _call_claude(settings: Settings, system: str, user: str, schema: dict) -> di
         raise RuntimeError("response truncated (raise AI_MAX_TOKENS)")
     text = next(b.text for b in response.content if b.type == "text")
     return json.loads(text)
+
+
+def ai_caller(settings: Settings, user: str):
+    """A `(system, schema) -> dict` callable bound to one user message, for services that build prompts."""
+    return lambda system, schema: _call_claude(settings, system, user, schema)
 
 
 def _with_fallback(settings: Settings, ai_fn, local_fn) -> dict:
@@ -364,6 +370,14 @@ def generate_vm_spec(settings: Settings, prompt: str) -> dict:
         lambda: validate_generated_spec(_call_claude(settings, _spec_system(settings), prompt, _spec_schema(settings))),
         lambda: validate_generated_spec(_local_spec(settings, prompt)),
     )
+    # Software: needs -> profiles / verified packages / reviewed role drafts
+    ai_call = ai_caller(settings, prompt) if settings.ai_enabled else None
+    analysis = software_service.analyze(settings, prompt, out["spec"], ai_call=ai_call, user=settings.app_user)
+    try:
+        out["spec"] = VmSpec(**software_service.apply_to_spec(out["spec"], analysis)).model_dump()
+    except ValidationError as exc:
+        out.setdefault("warnings", []).append(f"Software plan not applied: {exc.errors()[0]['msg']}")
+    out["software"] = analysis
     out["note"] = "Generated spec is a draft. Review it, then Generate Plan. Nothing is deployed automatically."
     return out
 
@@ -484,6 +498,11 @@ def _local_troubleshoot(vm_name: str, blob: str) -> dict:
 
 def troubleshoot(settings: Settings, vm_name: str, job_logs: str, validation_output: Any,
                  proxmox_status: Any) -> dict:
+    if isinstance(validation_output, dict) and isinstance(validation_output.get("tests"), list):
+        # only failing checks matter; ids and passing titles would just add noise
+        validation_output = {**validation_output, "tests": [
+            {k: t.get(k) for k in ("title", "where", "detail")} for t in validation_output["tests"]
+            if isinstance(t, dict) and not t.get("ok")]}
     blob = "\n".join([job_logs[-20000:], json.dumps(validation_output, default=str)[:10000],
                       json.dumps(proxmox_status, default=str)[:5000]])
 

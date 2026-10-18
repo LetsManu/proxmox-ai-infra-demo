@@ -66,6 +66,8 @@ class Settings(BaseSettings):
     ansible_dir: str = "/app/infra/ansible"
     extra_profile_dirs: str = ""  # project role folders with profile.yml, ":"-separated (e.g. /profiles)
     package_denylist: str = ""  # comma-separated package names users and the AI may not install
+    package_check: str = "live"  # live | offline | off  (availability check against the repositories)
+    approved_profiles_dir: str = ""  # where approved AI-drafted roles are stored (default: WORKSPACE_DIR/profiles)
     ansible_ssh_key_file: str = ""  # private key matching DEFAULT_SSH_PUBLIC_KEY (Docker secret)
     windows_admin_password: SecretStr = SecretStr("")
     # Optional SSH access to the node for the provider (cloud-init snippet upload)

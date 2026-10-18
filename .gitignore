@@ -30,7 +30,8 @@ workspace/
 *.db
 *.db-wal
 *.db-shm
-data/
+/data/
+/backend/data/
 *.log
 logs/
 

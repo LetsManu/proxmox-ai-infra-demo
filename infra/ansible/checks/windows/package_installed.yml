@@ -1,0 +1,7 @@
+- name: Query Chocolatey
+  chocolatey.chocolatey.win_chocolatey_facts:
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ (ansible_chocolatey.packages | default([]) | selectattr('package', 'equalto', check.package) | list | length) > 0 }}"
+    check_detail: "{{ check.package }} {{ 'installed' if (ansible_chocolatey.packages | default([]) | selectattr('package', 'equalto', check.package) | list | length) > 0 else 'not installed' }}"

@@ -56,16 +56,10 @@ def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = N
         time.sleep(0.2 if mock else 5)
 
 
-def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family: str, profiles: list[str],
-                 job_id: str, log: Log, packages: list[str] | None = None) -> dict:
-    packages = packages or []
-    catalog = get_profiles(settings)
-    labels = ", ".join(catalog.get(p, {}).get("label", p) for p in profiles) or "base only"
-    log(f"Configuring {name} ({os_family}) with Ansible: {labels}"
-        + (f"; packages: {', '.join(packages)}" if packages else ""))
-    if not settings.live_mode:
-        return _mock_run(settings, name, os_family, profiles, log, packages)
-
+def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os_family: str, job_id: str) -> str:
+    """Write a one-host inventory for this job; raises ConfigSkipped without credentials."""
+    if not ip:
+        raise ConfigSkipped("the VM has no IP address")
     if os_family == "windows" and not settings.windows_admin_password.get_secret_value():
         raise ConfigSkipped("WINDOWS_ADMIN_PASSWORD is not set; skipping configuration")
     key = settings.ansible_ssh_key_file
@@ -83,14 +77,13 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
             "ansible_ssh_common_args": (f"-o StrictHostKeyChecking=accept-new "
                                         f"-o UserKnownHostsFile={known_hosts_path(settings, env, name)}"),
         })
-    inventory = {os_family: {"hosts": {name: host}}}
     inv_path = os.path.join(run_dir, "inventory.json")
-    vars_path = os.path.join(run_dir, "vars.json")
     with open(inv_path, "w") as fh:
-        json.dump(inventory, fh)
-    with open(vars_path, "w") as fh:
-        json.dump({"profiles": profiles, "packages": packages}, fh)
+        json.dump({os_family: {"hosts": {name: host}}}, fh)
+    return inv_path
 
+
+def ansible_env(settings: Settings) -> dict:
     env_vars = dict(os.environ)
     env_vars.update({
         "ANSIBLE_CONFIG": os.path.join(settings.ansible_dir, "ansible.cfg"),
@@ -99,6 +92,24 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
         "ANSIBLE_NOCOLOR": "1",
         "WINDOWS_ADMIN_PASSWORD": settings.windows_admin_password.get_secret_value(),
     })
+    return env_vars
+
+
+def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family: str, profiles: list[str],
+                 job_id: str, log: Log, packages: list[str] | None = None) -> dict:
+    packages = packages or []
+    catalog = get_profiles(settings)
+    labels = ", ".join(catalog.get(p, {}).get("label", p) for p in profiles) or "base only"
+    log(f"Configuring {name} ({os_family}) with Ansible: {labels}"
+        + (f"; packages: {', '.join(packages)}" if packages else ""))
+    if not settings.live_mode:
+        return _mock_run(settings, name, os_family, profiles, log, packages)
+
+    inv_path = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id)
+    vars_path = os.path.join(os.path.dirname(inv_path), "vars.json")
+    with open(vars_path, "w") as fh:
+        json.dump({"profiles": profiles, "packages": packages}, fh)
+    env_vars = ansible_env(settings)
     cmd = ["ansible-playbook", "-i", inv_path, "-e", f"@{vars_path}", os.path.join(settings.ansible_dir, "site.yml")]
     log("$ " + " ".join(cmd))
     secret = settings.windows_admin_password.get_secret_value()

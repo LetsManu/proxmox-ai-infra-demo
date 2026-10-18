@@ -1,0 +1,9 @@
+- name: Effective sshd configuration
+  ansible.builtin.command: ["sshd", "-T"]
+  register: r
+  changed_when: false
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ (check.key | lower ~ ' ' ~ check.value | lower) in (r.stdout | lower).splitlines() }}"
+    check_detail: "{{ (r.stdout | lower).splitlines() | select('match', check.key | lower ~ ' ') | first | default(check.key ~ ' not set') }}"

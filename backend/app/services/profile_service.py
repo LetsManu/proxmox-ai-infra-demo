@@ -33,7 +33,8 @@ RESERVED = {"linux_base", "windows_base", "packages_linux", "packages_windows"}
 
 def _roots(settings: Settings) -> list[tuple[str, str]]:
     """(roles directory, source label) in priority order: built-in first."""
-    roots = [(os.path.join(settings.ansible_dir, "roles"), "built-in")]
+    roots = [(os.path.join(settings.ansible_dir, "roles"), "built-in"),
+             (settings.approved_profiles_dir or os.path.join(settings.workspace_dir, "profiles"), "approved")]
     for raw in re.split(r"[:,]", settings.extra_profile_dirs or ""):
         d = raw.strip()
         if not d:
@@ -80,6 +81,7 @@ def load_profiles(settings: Settings) -> list[dict]:
                 "description": str(meta.get("description") or "")[:200],
                 "port": int(port) if isinstance(port, int) and 0 < port < 65536 else None,
                 "source": source,
+                "tests": meta.get("tests") if isinstance(meta.get("tests"), list) else [],
             }
     return sorted(seen.values(), key=lambda p: (p["os_family"], p["source"] != "built-in", p["label"].lower()))
 

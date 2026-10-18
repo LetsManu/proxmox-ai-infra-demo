@@ -1,0 +1,11 @@
+- name: Request local URL
+  ansible.windows.win_uri:
+    url: "http://127.0.0.1:{{ check.port }}{{ check.path }}"
+    return_content: true
+    status_code: "{{ check.status | default(200) }}"
+  register: r
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.status_code | default(0) == (check.status | default(200)) and (check.contains | default('')) in (r.content | default('')) }}"
+    check_detail: "GET 127.0.0.1:{{ check.port }}{{ check.path }} -> {{ r.status_code | default('no answer') }}"

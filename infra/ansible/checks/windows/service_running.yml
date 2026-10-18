@@ -1,0 +1,8 @@
+- name: Query service
+  ansible.windows.win_service_info:
+    name: "{{ check.service }}"
+  register: r
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.exists and r.services[0].state == 'started' }}"
+    check_detail: "{{ check.service }} is {{ r.services[0].state if r.exists else 'not installed' }}"

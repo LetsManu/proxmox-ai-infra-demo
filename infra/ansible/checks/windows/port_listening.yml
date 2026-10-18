@@ -1,0 +1,13 @@
+- name: Listening TCP ports
+  ansible.windows.win_powershell:
+    parameters:
+      Port: "{{ check.port }}"
+    script: |
+      param([int]$Port)
+      [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+  register: r
+  changed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.output[0] | default(false) | bool }}"
+    check_detail: "tcp/{{ check.port }} {{ 'listening' if r.output[0] | default(false) | bool else 'not listening' }}"

@@ -1,0 +1,6 @@
+- name: "Check: {{ check.title }}"
+  ansible.builtin.include_tasks: "{{ family }}/{{ check.type }}.yml"
+
+- name: "Result: {{ check.title }}"
+  ansible.builtin.debug:
+    msg: "CHECK|{{ check.id }}|{{ 'PASS' if check_ok | bool else 'FAIL' }}|{{ check_detail | string | replace('\"', '') | replace('\n', ' ') | truncate(160) }}"

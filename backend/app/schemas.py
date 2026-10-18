@@ -184,6 +184,11 @@ class ConfigureRequest(BaseModel):
         return normalize_env(v)
 
 
+class DraftTestsRequest(BaseModel):
+    name: str = Field(min_length=3, max_length=63)
+    environment: str = Field("test", pattern="^(test|prod)$")
+
+
 class PlatformApplyRequest(BaseModel):
     plan_job_id: str
     confirm_destroy: bool = False

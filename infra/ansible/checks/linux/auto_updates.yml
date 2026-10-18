@@ -1,0 +1,9 @@
+- name: Read APT periodic settings
+  ansible.builtin.command: ["apt-config", "dump", "APT::Periodic::Unattended-Upgrade"]
+  register: r
+  changed_when: false
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.stdout is search('Unattended-Upgrade \"1\"') }}"
+    check_detail: "{{ 'unattended-upgrades enabled' if r.stdout is search('Unattended-Upgrade \"1\"') else 'unattended-upgrades not enabled' }}"

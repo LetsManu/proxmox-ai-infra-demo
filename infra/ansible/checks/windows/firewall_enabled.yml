@@ -1,0 +1,10 @@
+- name: Firewall profiles
+  ansible.windows.win_powershell:
+    script: |
+      @(Get-NetFirewallProfile | Where-Object { -not $_.Enabled } | ForEach-Object { $_.Name }) -join ','
+  register: r
+  changed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ (r.output[0] | default('')) == '' }}"
+    check_detail: "{{ 'all profiles enabled' if (r.output[0] | default('')) == '' else 'disabled: ' ~ r.output[0] }}"

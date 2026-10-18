@@ -77,3 +77,23 @@ class HistoryEntry(Base):
     user: Mapped[str] = mapped_column(String(64))
     plan_summary: Mapped[str] = mapped_column(Text, default="")
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class Proposal(Base):
+    """Something the AI drafted that a person must review before it is used:
+    an Ansible role (new software profile), a test suite, or a stack architecture."""
+
+    __tablename__ = "proposals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    kind: Mapped[str] = mapped_column(String(16), index=True)  # role | tests | stack
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending|approved|rejected
+    target: Mapped[str] = mapped_column(String(128), default="")  # e.g. "test/demo-web-test" for tests
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    review: Mapped[dict] = mapped_column(JSON, default=dict)  # automated safety checks
+    source: Mapped[str] = mapped_column(String(64), default="")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
