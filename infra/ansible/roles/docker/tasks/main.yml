@@ -1,0 +1,16 @@
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: [docker.io, docker-compose-v2]
+    state: present
+
+- name: Start Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Let the cloud-init user run Docker
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true

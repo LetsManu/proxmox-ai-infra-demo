@@ -11,8 +11,9 @@ from ..config import ENVIRONMENTS, Settings, get_settings
 from ..database import session_scope
 from ..models import HistoryEntry, Job, VirtualMachine
 from ..schemas import HistoryOut, JobCreated, JobOut, PlanRequest, VmSpec
+from ..services import config_service
 from ..services.proxmox_service import MockProxmox, ProxmoxError, find_free_vmid, get_proxmox
-from ..services.template_service import ensure_template
+from ..services.template_service import ensure_template, os_family_for
 from ..services.terraform_service import TerraformService, vm_entry
 from ..workers.job_runner import JobContext, create_job, submit
 
@@ -103,10 +104,43 @@ def apply_plan(ctx: JobContext, settings: Settings, env: str, plan: dict, spec: 
                 row.last_validation = None
                 row.last_validation_at = None
                 row.ip_address = None
+                config_service.forget_host(settings, env, name)
+                row.config_status = None
+                row.configured_at = None
                 if isinstance(px, MockProxmox):
-                    px.register_vm(row.vmid, name, env)
+                    px.register_vm(row.vmid, name, env, windows=os_family_for(row.spec.get("template", "")) == "windows")
             row.status = "running"
     ctx.update_result(applied=True, applied_at=now.isoformat())
+
+
+def configure(ctx: JobContext, settings: Settings, env: str, name: str) -> str:
+    """Install the base role and the VM's software profiles with Ansible. Returns the config status."""
+    vm = get_vm(name, env)
+    if not vm:
+        return "skipped"
+    profiles = vm.spec.get("profiles") or []
+    os_family = os_family_for(vm.spec.get("template", ""))
+    status, error, ip = "success", None, None
+    try:
+        ip = config_service.wait_for_ip(settings, vm.vmid, ctx.log)
+        config_service.configure_vm(settings, name=name, env=env, ip=ip, os_family=os_family,
+                                    profiles=profiles, job_id=ctx.job_id, log=ctx.log)
+        ctx.log(f"Configuration of {name} complete.")
+    except config_service.ConfigSkipped as exc:
+        status = "skipped"
+        ctx.log(f"Configuration skipped: {exc}")
+    except Exception as exc:  # noqa: BLE001 - recorded on the VM, then re-raised
+        status, error = "failed", exc
+    with session_scope() as db:
+        row = db.query(VirtualMachine).filter_by(name=name, environment=env).one()
+        row.config_status = status
+        row.configured_at = datetime.now(timezone.utc)
+        if ip:
+            row.ip_address = ip
+    ctx.update_result(config_status=status)
+    if error:
+        raise RuntimeError(f"Configuration failed: {error}") from error
+    return status
 
 
 def plan_job_or_404(job_id: str) -> Job:

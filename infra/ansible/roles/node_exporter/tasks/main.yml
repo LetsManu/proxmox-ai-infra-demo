@@ -1,0 +1,10 @@
+- name: Install Prometheus node exporter
+  ansible.builtin.apt:
+    name: prometheus-node-exporter
+    state: present
+
+- name: Start node exporter (port 9100)
+  ansible.builtin.service:
+    name: prometheus-node-exporter
+    state: started
+    enabled: true

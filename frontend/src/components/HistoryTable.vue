@@ -12,7 +12,7 @@ defineProps({
 })
 const emit = defineEmits(['select', 'retry'])
 const tab = ref('history')
-const OS = { 'ubuntu-24-04': 'Ubuntu 24.04', 'debian-12': 'Debian 12' }
+const OS = { 'ubuntu-24-04': 'Ubuntu 24.04', 'debian-12': 'Debian 12', 'windows-2022': 'Windows 2022' }
 </script>
 
 <template>

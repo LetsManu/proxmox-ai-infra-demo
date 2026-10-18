@@ -8,7 +8,8 @@ from ..config import get_settings
 from ..database import session_scope
 from ..models import JobStatus, VirtualMachine
 from ..schemas import JobCreated, ValidateRequest
-from ..services.validation_service import validate_vm
+from ..services.template_service import os_family_for
+from ..services.validation_service import finish, validate_vm
 from ..workers.job_runner import JobContext, JobOutcome, create_job, submit
 from .plans import get_vm
 
@@ -26,9 +27,13 @@ def validate(req: ValidateRequest):
 
     def work(ctx: JobContext):
         ctx.log(f"Validating {req.name} (VMID {vm.vmid}) in {req.environment.upper()}")
+        os_family = os_family_for(vm.spec.get("template", ""))
         result = validate_vm(s, vmid=vm.vmid, env=req.environment, health_check_port=req.health_check_port,
                              health_check_path=req.health_check_path, simulate_failure=req.simulate_failure,
-                             log=ctx.log)
+                             log=ctx.log, os_family=os_family)
+        current = get_vm(req.name, req.environment)
+        result = finish(result, config_status=current.config_status, profiles=vm.spec.get("profiles") or [],
+                        log=ctx.log)
         ctx.update_result(validation=result, summary=f"Validation {result['overall']}")
         with session_scope() as db:
             row = db.query(VirtualMachine).filter_by(name=req.name, environment=req.environment).one()

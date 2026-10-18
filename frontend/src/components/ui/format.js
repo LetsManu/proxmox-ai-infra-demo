@@ -43,7 +43,9 @@ export const ACTION_LABEL = {
   'recreate-approved': 'Recreate approved',
   'recreate-rejected': 'Recreate rejected',
   'recreate-apply': 'Recreate (production)',
-  'build-template': 'Build template',
+  'platform-plan': 'Platform plan',
+  'platform-apply': 'Build platform',
+  configure: 'Configure software',
 }
 
-export const ENV_LABEL = { test: 'Test', prod: 'Production', infra: 'Infra' }
+export const ENV_LABEL = { test: 'Test', prod: 'Production', infra: 'Platform' }

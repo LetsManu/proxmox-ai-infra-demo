@@ -1,0 +1,23 @@
+- name: Install IIS
+  ansible.windows.win_feature:
+    name: Web-Server
+    include_management_tools: true
+    state: present
+  register: iis
+
+- name: Reboot if IIS requires it
+  ansible.windows.win_reboot:
+  when: iis.reboot_required
+
+- name: Landing page
+  ansible.windows.win_copy:
+    dest: C:\inetpub\wwwroot\index.html
+    content: "<h1>{{ inventory_hostname }}</h1><p>Configured by proxmox-ai-infra-demo.</p>"
+
+- name: Open HTTP in the firewall
+  ansible.windows.win_powershell:
+    script: |
+      if (-not (Get-NetFirewallRule -Name 'infra-demo-http' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name 'infra-demo-http' -DisplayName 'HTTP (infra-demo)' -Protocol TCP -LocalPort 80 -Action Allow | Out-Null
+        $Ansible.Changed = $true
+      } else { $Ansible.Changed = $false }

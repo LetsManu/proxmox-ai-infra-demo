@@ -1,0 +1,4 @@
+<!doctype html>
+<title>{{ inventory_hostname }}</title>
+<h1>{{ inventory_hostname }}</h1>
+<p>Deployed and configured by proxmox-ai-infra-demo. Profiles: {{ profiles | default([]) | join(', ') }}</p>

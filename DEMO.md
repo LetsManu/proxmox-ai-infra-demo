@@ -6,6 +6,7 @@
 |---|---|
 | 0:00 | Opening and problem |
 | 1:30 | Architecture in one slide |
+| 2:30 | Platform: the console builds its own templates |
 | 3:00 | AI drafts a VM |
 | 4:30 | Plan + AI review |
 | 6:00 | Deploy to TEST |
@@ -47,11 +48,27 @@ Open `http://localhost:8080`. It looks like the Proxmox UI on purpose: resource 
 
 > "Top right: mode (Live or Mock), the Proxmox version and node, OpenTofu, which assistant (Claude or local rules), running tasks, and who I am for the audit trail. The progress bar tracks this VM from definition to production; the blue button is always the next step."
 
+## 2:30 Platform (the tool creates what it needs)
+
+Point at the **Platform** card (step 1 in the progress bar): networks, storage and pool are *Present* (created once
+by the admin bootstrap), the Ubuntu and Debian templates are *Missing*, Windows is *Provided once*. Generate Plan is
+disabled.
+
+Click **Prepare Platform**. **Expected:** platform plan `4 to add`: two `proxmox_download_file` (official cloud
+images) and two templates. Click **Build templates**. **Expected:** toast *Platform built*, the card turns *Ready*,
+the templates appear in the resource tree.
+
+> "The console provisions its own prerequisites as code: it downloads the official cloud images and turns them
+> into templates. What it is *not* allowed to create, users, permissions, networks, came from a one-time
+> bootstrap that an admin runs with admin rights. The console itself never has them."
+
 ## 3:00 AI drafts a VM (AI moment 1)
 
 The prompt box is pre-filled: *"Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed."* Open **Draft from a description** (open by default) and click **Draft spec**.
 
-**Expected:** a draft card: name `demo-web-test`, Ubuntu 24.04, 2 vCPU · 4 GB · 40 GB, packages `qemu-guest-agent, docker.io`.
+**Expected:** a draft card: name `demo-web-test`, Ubuntu 24.04, 2 vCPU · 4 GB · 40 GB, software *Docker, Nginx web server*.
+
+> "The AI chose software from our catalog of Ansible profiles. It cannot invent commands: the catalog is the whole menu."
 
 > "The AI produces structured JSON, and then **our code validates it**: known template, within TEST limits, safe commands. It's a draft: nothing happened yet."
 
@@ -63,6 +80,8 @@ Click **Use this spec**.
 
 Click **Generate Plan**.
 
+After *Use this spec*, show the **Software** section: Docker and Nginx ticked. Optional: switch OS to *Windows Server 2022* to show IIS / admin tools, then switch back.
+
 **Expected:** Plan card `1 to add · 0 to change · 0 to destroy`, a green *Create* row, VMID in 900–999, template 9000; the raw OpenTofu output under *OpenTofu output*. **Plan review** card: *Low risk*, a plain-language summary, a tickable *Before you continue* checklist, and the note that production changes always need a person.
 
 > "This is a real OpenTofu plan. The AI translates it into plain English and rates the risk. Important detail: risk is computed **twice**. If the AI says 'low' but the plan destroys something, our parser overrides it to HIGH. The AI can raise risk, never lower it."
@@ -71,9 +90,9 @@ Click **Generate Plan**.
 
 Click **Deploy to Test**. Scroll to the **Job log**.
 
-**Expected:** `Creating... Still creating... Creation complete ... Apply complete! Resources: 1 added`.
+**Expected:** `Creating... Creation complete ... Apply complete!`, then Ansible: `PLAY [Configure Linux VMs]`, tasks like *Install Docker Engine and Compose*, *Install Nginx*, and `PLAY RECAP … failed=0`.
 
-> "Deploy applies **exactly the plan we just reviewed**: the saved plan file. If I change the form now, the button disables and the API refuses too. TEST uses linked clones from a cloud-init template, so it's fast and disposable."
+> "Deploy applies **exactly the plan we just reviewed**: the saved plan file. Then Ansible configures the VM: base hardening plus Docker and Nginx. Same flow for Windows over WinRM. TEST uses linked clones, so it's fast and disposable."
 
 (Live mode: switch to the Proxmox tab and show VM 9xx booting.)
 
@@ -99,7 +118,7 @@ Click **Recreate VM** → the confirmation dialog explains the data loss → **R
 
 Untick *Simulate failure*, click **Validate**.
 
-**Expected:** all four checks ✔ (IP from the guest agent, `boot-finished present`, `tcp/…:22 open`), status **Passed**.
+**Expected:** all checks ✔ (IP from the guest agent, `boot-finished present`, `tcp/…:80 open`, *Software configured: base, docker, nginx*), status **Passed**.
 
 ## 10:00 Production promotion
 
@@ -153,7 +172,7 @@ Clean slate between rehearsals: `docker compose down -v && docker compose up -d`
 ## Pre-demo checklist
 
 - [ ] `docker compose up -d --build` done, both containers `healthy`
-- [ ] `docker compose down -v && docker compose up -d` for empty history
+- [ ] `docker compose down -v && docker compose up -d` for empty history (mock: templates start missing so you can show *Prepare Platform*; set `MOCK_PLATFORM_READY=true` to skip that part)
 - [ ] Browser zoom 110–125 %, dark mode, notifications off
 - [ ] Live mode only: templates 9000/9001 exist, test VLAN has DHCP + DNS, `curl` to the API works from the console host, no leftover VMs in 900–999 / 100–299 with the demo names
 - [ ] Mock fallback rehearsed once (`LIVE_MODE=false`)

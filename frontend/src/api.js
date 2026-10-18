@@ -30,6 +30,12 @@ export const api = {
   health: () => request('GET', '/health'),
   proxmoxStatus: () => request('GET', '/proxmox/status'),
   templates: () => request('GET', '/templates'),
+  profiles: () => request('GET', '/profiles'),
+  platform: () => request('GET', '/platform'),
+  platformPlan: () => request('POST', '/platform/plan'),
+  platformApply: (planJobId, confirmDestroy = false) =>
+    request('POST', '/platform/apply', { plan_job_id: planJobId, confirm_destroy: confirmDestroy }),
+  configure: (body) => request('POST', '/vms/configure', body),
   environments: () => request('GET', '/environments'),
   vms: () => request('GET', '/vms'),
   history: () => request('GET', '/history?limit=50'),

@@ -58,6 +58,8 @@ class VirtualMachine(Base):
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_validation: Mapped[str | None] = mapped_column(String(8), nullable=True)  # PASS / FAIL
     last_validation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    config_status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # success / failed / skipped
+    configured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

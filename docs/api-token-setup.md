@@ -1,5 +1,8 @@
 # Proxmox API token setup
 
+> The fastest way is `infra/scripts/bootstrap.sh` (see [proxmox-setup.md](proxmox-setup.md#0-recommended-bootstrap-with-opentofu)):
+> it creates the user, role, token and ACLs below as OpenTofu code. This page explains what it creates and how to do it by hand.
+
 The console authenticates to Proxmox VE with an **API token** of a dedicated, unprivileged user. It never uses root and never uses a password.
 
 ## Token format
@@ -65,7 +68,7 @@ Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
 
 Deliberately **not** granted: `Sys.Modify`, `Permissions.Modify`, `User.Modify`, `Sys.Console`, `VM.Console`, `Realm.*`.
 
-Template building through the API (`POST /api/templates/build`) additionally needs `Datastore.AllocateTemplate` on the image storage. The recommended path is the shell script on the node, which needs no extra API rights.
+The platform stack (*Prepare Platform*) downloads cloud images, so the role also needs `Datastore.AllocateTemplate` (on the image storage) and `Pool.Audit`/`SDN.Audit` for the status view; the bootstrap role includes them. Add them to the manual role above if you use the platform stack.
 
 ## 3. Token (privilege separated)
 

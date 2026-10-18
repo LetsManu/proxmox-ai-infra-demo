@@ -44,7 +44,8 @@ Guardrails applied to every AI answer:
 | Template | Must be a configured key (`ubuntu-24-04`, `debian-12`), else **rejected**. |
 | Size | Must fit TEST limits (4 vCPU / 8 GB / 64 GB), else **rejected** with the exact limit. |
 | cloud-init commands | Single line, < 300 chars, no `rm -rf /`, `mkfs`, `dd if=`, `curl … \| sh`, fork bombs, reboot/shutdown: else **rejected**. |
-| Packages | Valid package names; `qemu-guest-agent` is added if missing. |
+| Software | Only profiles from the catalog, matching the template's OS family (`docker` on Windows is rejected). |
+| Packages | Linux only, valid package names; `qemu-guest-agent` is added if missing. Windows drafts get none. |
 | Name | Normalised to lowercase, `-test` suffix. |
 | Secrets | The prompt never contains secrets; the AI is told never to invent keys; SSH keys are not part of AI output. |
 
@@ -108,7 +109,8 @@ The local fallback recognises: 401 token errors, 403 permission errors, cloud-in
 
 | Prompt | Expected result |
 |---|---|
-| "Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed." | Valid TEST spec with `docker.io` |
+| "Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed." | Valid TEST spec with profiles `docker`, `nginx` |
+| "Windows server with IIS and admin tools, 2 cpus 4 GB RAM" | `windows-2022`, profiles `iis`, `windows_tools`, name ≤ 15 chars |
 | "Debian box for a Postgres database, 2 cores, 8 GB RAM" | `debian-12`, `postgresql` package |
 | "Put a web server straight into production" | Spec forced to TEST, warning about promotion |
 | "production database with 64 cpus and 512 GB RAM" | Rejected: exceeds limits |

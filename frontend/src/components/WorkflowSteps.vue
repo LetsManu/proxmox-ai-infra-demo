@@ -31,7 +31,7 @@ const current = computed(() => props.steps.findIndex((s) => s.state === 'current
 
 <style scoped>
 .steps { background: var(--surface); border: 1px solid #3d3d3d; border-radius: var(--radius); }
-ol { list-style: none; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); padding: .6rem .9rem; gap: .5rem; }
+ol { list-style: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); padding: .6rem .9rem; gap: .5rem; }
 li { display: flex; align-items: center; gap: .6rem; position: relative; min-width: 0; }
 li:not(:last-child)::after { content: ''; flex: 1; height: 1px; background: var(--line-strong); margin-left: .25rem; min-width: 12px; }
 li.done:not(:last-child)::after { background: rgba(74, 222, 128, .45); }

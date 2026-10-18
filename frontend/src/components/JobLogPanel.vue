@@ -23,7 +23,8 @@ function onScroll() {
 }
 
 function cls(line) {
-  if (/ERROR|FAIL|failed|Permission denied|rejected/i.test(line)) return 'l-err'
+  if (/failed=0/.test(line)) return 'l-ok' // Ansible PLAY RECAP without failures
+  if (/ERROR|FAIL|failed|fatal:|UNREACHABLE!|Permission denied|rejected/i.test(line)) return 'l-err'
   if (/Destroying|Destruction|DESTRUCTIVE/.test(line)) return 'l-warn'
   if (/complete|-> OK|PASS|ready/i.test(line)) return 'l-ok'
   if (line.includes('$ ') || line.includes('[mock]')) return 'l-cmd'

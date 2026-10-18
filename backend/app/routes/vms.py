@@ -4,14 +4,14 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
 
-from ..config import ENVIRONMENTS, TEMPLATE_CATALOG, get_settings, placement, public_settings
+from ..config import ENVIRONMENTS, PROFILE_CATALOG, get_settings, placement, public_settings
 from ..database import session_scope
 from ..models import Job, JobStatus, VirtualMachine
-from ..schemas import NETWORKS, DeployTestRequest, JobCreated, PowerRequest, RecreateRequest, VmOut
+from ..schemas import NETWORKS, ConfigureRequest, DeployTestRequest, JobCreated, PowerRequest, RecreateRequest, VmOut
 from ..services import template_service
 from ..services.proxmox_service import ProxmoxError, get_proxmox
 from ..workers.job_runner import JobContext, JobOutcome, create_job, submit
-from .plans import apply_plan, get_vm, plan_job_or_404, run_plan
+from .plans import apply_plan, configure, get_vm, plan_job_or_404, run_plan
 from .promotion import check_approval, finish_approval_job
 
 router = APIRouter(prefix="/api", tags=["vms"])
@@ -44,6 +44,11 @@ def proxmox_status():
 @router.get("/templates")
 def templates():
     return template_service.list_templates(get_settings())
+
+
+@router.get("/profiles")
+def profiles():
+    return PROFILE_CATALOG
 
 
 @router.get("/environments")
@@ -90,7 +95,9 @@ def deploy_test(req: DeployTestRequest):
         with session_scope() as db:
             db.get(Job, plan_job.id).result = {**plan_job.result, "applied": True}
         ctx.update_result(vmid=plan_job.result["vmid"], summary=plan_job.result["summary"])
-        ctx.log(f"TEST VM '{spec.name}' deployed as VMID {plan_job.result['vmid']}. Next: Validate.")
+        ctx.log(f"TEST VM '{spec.name}' deployed as VMID {plan_job.result['vmid']}.")
+        configure(ctx, s, "test", spec.name)
+        ctx.log("Next: Validate.")
         return plan_job.result["summary"]
 
     submit(job_id, work, env_lock="test")
@@ -118,6 +125,7 @@ def recreate(req: RecreateRequest):
         def apply_work(ctx: JobContext):
             ctx.log(f"Approved by {s.app_user} (typed RECREATE)")
             apply_plan(ctx, s, "prod", job.result["plan"], None)
+            configure(ctx, s, "prod", job.vm_name)
             return job.result["plan"]["summary"]
 
         submit(apply_id, apply_work, env_lock="prod")
@@ -137,7 +145,8 @@ def recreate(req: RecreateRequest):
             ctx.log("Production recreate plan ready. DESTRUCTIVE. Waiting for explicit human approval.")
             return JobOutcome(JobStatus.AWAITING_APPROVAL, result["summary"])
         apply_plan(ctx, s, env, result["plan"], None)
-        ctx.log("TEST VM recreated. Validation state was reset; run Validate again.")
+        configure(ctx, s, env, req.name)
+        ctx.log("TEST VM recreated and configured. Validation state was reset; run Validate again.")
         return result["summary"]
 
     submit(job_id, work, env_lock=env)
@@ -159,29 +168,21 @@ def power(req: PowerRequest):
         raise HTTPException(502, str(exc)) from exc
 
 
-@router.post("/templates/build", response_model=JobCreated, status_code=202)
-def build_template(template: str):
-    """Build a cloud-init template from the configured cloud image URL (API path, PVE 8.4+)."""
+@router.post("/vms/configure", response_model=JobCreated, status_code=202)
+def configure_vm(req: ConfigureRequest):
+    """Re-run Ansible (idempotent) for a deployed VM."""
     s = get_settings()
-    if template not in {t["key"] for t in TEMPLATE_CATALOG}:
-        raise HTTPException(400, f"Unknown template '{template}'")
-    url = template_service.image_url_for(s, template)
-    if not url:
-        raise HTTPException(400, f"No image URL configured for {template}. Set it in .env.")
-    vmid = template_service.template_id_for(s, template)
-    job_id = create_job(action="build-template", environment="infra", vm_name=f"tmpl-{template}",
-                        user=s.app_user, params={"template": template, "vmid": vmid})
+    vm = get_vm(req.name, req.environment)
+    if not vm:
+        raise HTTPException(404, f"VM '{req.name}' is not deployed in {req.environment}.")
+    if req.environment == "prod":
+        raise HTTPException(403, "Production is configured as part of an approved promotion or recreate.")
+    job_id = create_job(action="configure", environment=req.environment, vm_name=req.name, user=s.app_user,
+                        params={"profiles": vm.spec.get("profiles") or []})
 
     def work(ctx: JobContext):
-        px = get_proxmox(s)
-        if px.template_exists(vmid):
-            raise RuntimeError(f"VMID {vmid} already exists. Delete it or change the template ID in .env.")
-        out = px.create_template_from_image(
-            vmid=vmid, name=f"tmpl-{template}", image_url=url, image_storage=s.image_storage,
-            disk_storage=s.template_storage, bridge=s.test_bridge, ci_user=s.ci_user,
-            ssh_public_key=s.default_ssh_public_key, log=ctx.log)
-        ctx.update_result(**out)
-        return f"Template {out['name']} created as VMID {out['template_id']}"
+        status = configure(ctx, s, req.environment, req.name)
+        return f"Configuration {status}"
 
-    submit(job_id, work)
+    submit(job_id, work, env_lock=req.environment)
     return JobCreated(job_id=job_id, status="queued")

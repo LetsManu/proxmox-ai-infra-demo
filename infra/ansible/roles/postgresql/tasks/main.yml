@@ -1,0 +1,10 @@
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Start PostgreSQL (listens on localhost only by default)
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: true

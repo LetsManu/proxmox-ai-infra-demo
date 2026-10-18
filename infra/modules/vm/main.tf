@@ -1,5 +1,8 @@
 locals {
-  use_snippet = var.snippets_datastore_id != "" && (length(var.packages) > 0 || length(var.commands) > 0)
+  windows = var.os_family == "windows"
+  # Linux: always ship a vendor-data snippet when a snippet store exists, so the
+  # QEMU guest agent is installed even if the image lacks it.
+  use_snippet = !local.windows && var.snippets_datastore_id != ""
   is_dhcp     = var.ipv4_address == "dhcp"
 }
 
@@ -33,6 +36,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   tags        = sort(distinct(var.tags))
   on_boot     = var.start_on_boot
   started     = true
+  pool_id     = var.pool_id == "" ? null : var.pool_id
 
   clone {
     vm_id = var.template_id
@@ -67,7 +71,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   }
 
   operating_system {
-    type = "l26"
+    type = local.windows ? "win11" : "l26"
   }
 
   serial_device {}
@@ -83,8 +87,9 @@ resource "proxmox_virtual_environment_vm" "this" {
     }
 
     user_account {
-      username = var.ci_user
-      keys     = trimspace(var.ssh_public_key) == "" ? [] : [trimspace(var.ssh_public_key)]
+      username = local.windows ? "Administrator" : var.ci_user
+      keys     = local.windows || trimspace(var.ssh_public_key) == "" ? [] : [trimspace(var.ssh_public_key)]
+      password = local.windows ? var.admin_password : null
     }
 
     vendor_data_file_id = local.use_snippet ? proxmox_virtual_environment_file.vendor_data[0].id : null
@@ -94,6 +99,10 @@ resource "proxmox_virtual_environment_vm" "this" {
     precondition {
       condition     = var.vm_id >= var.vm_id_min && var.vm_id <= var.vm_id_max
       error_message = "VM ID ${var.vm_id} is outside the allowed range ${var.vm_id_min}-${var.vm_id_max} for this environment."
+    }
+    precondition {
+      condition     = !local.windows || length(var.admin_password) >= 12
+      error_message = "Windows VMs need WINDOWS_ADMIN_PASSWORD (12+ characters) for cloudbase-init and Ansible."
     }
   }
 }

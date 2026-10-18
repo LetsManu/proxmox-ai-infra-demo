@@ -39,10 +39,28 @@ jobs:
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with: { tofu_version: 1.12.7, tofu_wrapper: false }
       - run: tofu fmt -check -recursive
-      - run: tofu init -backend=false -input=false
-      - run: tofu validate
+      - name: Validate the VM, platform and bootstrap stacks
+        run: |
+          for d in . platform bootstrap; do
+            (cd "$d" && tofu init -backend=false -input=false && tofu validate)
+          done
       - name: Shell scripts parse
         run: for f in scripts/*.sh; do bash -n "$f"; done
+
+  ansible:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: infra/ansible } }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with: { python-version: "3.13" }
+      - run: pip install ansible-core==2.21.5 pywinrm==0.5.0
+      - run: ansible-galaxy collection install -r requirements.yml
+      - name: Playbook syntax (all profiles)
+        run: |
+          echo '{"linux":{"hosts":{"l":{}}},"windows":{"hosts":{"w":{}}}}' > /tmp/inv.json
+          ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i /tmp/inv.json site.yml --syntax-check \
+            -e '{"profiles":["docker","nginx","postgresql","node_exporter","iis","windows_tools"]}'
 
   # A fresh clone needs no .env (mock mode); an existing setup keeps working with its .env.
   compose:
@@ -56,7 +74,7 @@ jobs:
       - name: Compose config with .env.example (+ secrets override)
         run: |
           cp .env.example .env
-          mkdir -p secrets && touch secrets/proxmox_token_secret secrets/anthropic_api_key
+          mkdir -p secrets && touch secrets/proxmox_token_secret secrets/anthropic_api_key secrets/ansible_ssh_key secrets/windows_admin_password secrets/proxmox_ssh_key
           docker compose config -q
           docker compose -f docker-compose.yml -f docker-compose.secrets.yml config -q
           rm -rf .env secrets

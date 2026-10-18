@@ -1,0 +1,42 @@
+- name: Install base packages
+  ansible.builtin.apt:
+    name: [qemu-guest-agent, unattended-upgrades, curl, ca-certificates, htop]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable QEMU guest agent
+  ansible.builtin.service:
+    name: qemu-guest-agent
+    state: started
+    enabled: true
+
+- name: Enable automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    mode: "0644"
+
+- name: Set timezone to UTC
+  ansible.builtin.file:
+    src: /usr/share/zoneinfo/Etc/UTC
+    dest: /etc/localtime
+    state: link
+
+- name: SSH - keys only, no root login
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-infra-demo.conf
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin no
+      KbdInteractiveAuthentication no
+    mode: "0644"
+  notify: Restart ssh
+
+- name: Record managed state
+  ansible.builtin.copy:
+    dest: /etc/infra-demo.json
+    content: "{{ {'profiles': profiles | default([]), 'configured_by': 'proxmox-ai-infra-demo'} | to_nice_json }}"
+    mode: "0644"

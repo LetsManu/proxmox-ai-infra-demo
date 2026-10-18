@@ -105,6 +105,7 @@ variable "vms" {
     tags           = optional(list(string), [])
     packages       = optional(list(string), [])
     commands       = optional(list(string), [])
+    os_family      = optional(string, "linux")
   }))
   default = {}
 
@@ -112,4 +113,17 @@ variable "vms" {
     condition     = alltrue([for k, _ in var.vms : can(regex("^[a-z][a-z0-9-]{1,40}[a-z0-9]$", k))])
     error_message = "VM names must be lowercase letters, digits and hyphens."
   }
+}
+
+variable "pool_id" {
+  description = "Resource pool for managed VMs ('' = none). Created by infra/bootstrap."
+  type        = string
+  default     = ""
+}
+
+variable "windows_admin_password" {
+  description = "Administrator password for Windows VMs. Passed as TF_VAR_windows_admin_password, never written to disk."
+  type        = string
+  default     = ""
+  sensitive   = true
 }

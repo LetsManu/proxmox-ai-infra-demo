@@ -13,7 +13,18 @@ A Proxmox **template** made from such an image can be cloned in seconds. Every c
 
 URLs live in configuration (`UBUNTU_2404_IMAGE_URL`, `DEBIAN_12_IMAGE_URL`), never in code. Checksums are published next to the images (`SHA256SUMS`, `SHA512SUMS`); verify them for production templates.
 
-## Option A (recommended): script on the Proxmox node
+## Option A (recommended): the platform stack, from the console
+
+`infra/platform` declares, per Linux template, a `proxmox_download_file` (the official image, content type
+`import`) and a `proxmox_virtual_environment_vm` with `template = true` whose disk is `import_from` that file,
+plus agent, serial console and a cloud-init drive. In the console: **Platform → Prepare Platform** (plan) →
+**Build templates** (apply). The console's token is enough (the bootstrap grants `Datastore.AllocateTemplate`
+on the image storage). Requires PVE 8.4+.
+
+Cloud images lack the QEMU guest agent. With `SNIPPETS_DATASTORE` set (and node SSH for the provider), every
+Linux VM gets a vendor-data snippet that installs it on first boot; Ansible's base role installs it too.
+
+## Option B: script on the Proxmox node (PVE 7.2+, or to bake the agent into the image)
 
 `infra/scripts/create-cloudinit-template.sh` performs all steps:
 
@@ -41,7 +52,7 @@ Static IP instead of DHCP: `--static 192.0.2.50/24,192.0.2.1`. (Clones get their
 
 The script only reads the two `*_IMAGE_URL` lines from the env file; it never sources it.
 
-## Option B: manual commands
+## Option C: manual commands
 
 ```bash
 wget https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
@@ -53,10 +64,6 @@ qm set 9000 --boot order=scsi0 --ide2 local-lvm:cloudinit --serial0 socket --vga
 qm set 9000 --agent enabled=1 --ipconfig0 ip=dhcp --ciuser ops --sshkeys ~/.ssh/infra-demo.pub
 qm template 9000
 ```
-
-## Option C: from the console API (PVE 8.4+)
-
-`POST /api/templates/build?template=ubuntu-24-04` downloads the image to `IMAGE_STORAGE` (content type `import`), creates the VM with `import-from`, adds cloud-init and agent, and converts it. It needs `Datastore.AllocateTemplate` on the image storage and cannot run `virt-customize`, so the agent is not baked in. Use option A for the demo.
 
 ## QEMU guest agent
 

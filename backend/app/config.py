@@ -46,11 +46,13 @@ class Settings(BaseSettings):
     prod_storage: str = "local-lvm"
     prod_bridge: str = "vmbr0"
     prod_vlan: int = 10
-    snippets_datastore: str = ""  # optional; enables cloud-init package installs
+    snippets_datastore: str = ""  # optional; enables cloud-init vendor data (guest agent, packages)
+    pool_id: str = ""  # resource pool created by infra/bootstrap
 
     # --- Templates ---------------------------------------------------------
     template_ubuntu_2404_id: int = 9000
     template_debian_12_id: int = 9001
+    template_windows_2022_id: int = 9002
     template_storage: str = "local-lvm"
     image_storage: str = "local"
     ubuntu_2404_image_url: str = ""
@@ -60,10 +62,19 @@ class Settings(BaseSettings):
     ci_user: str = "ops"
     default_ssh_public_key: str = ""
 
+    # --- Configuration management (Ansible) -------------------------------
+    ansible_dir: str = "/app/infra/ansible"
+    ansible_ssh_key_file: str = ""  # private key matching DEFAULT_SSH_PUBLIC_KEY (Docker secret)
+    windows_admin_password: SecretStr = SecretStr("")
+    # Optional SSH access to the node for the provider (cloud-init snippet upload)
+    proxmox_ssh_username: str = ""
+    proxmox_ssh_private_key_file: str = ""
+
     # --- Validation --------------------------------------------------------
     validation_timeout_seconds: int = 300
     mock_fail_validation: bool = False
     mock_speed: float = 1.0  # >1 makes mock jobs faster (used by tests)
+    mock_platform_ready: bool = False  # mock: start with templates already built
 
     # --- AI ----------------------------------------------------------------
     ai_provider: str = "none"  # "anthropic" or "none"
@@ -163,7 +174,7 @@ def placement(settings: Settings, env: str) -> dict:
 
 
 # Secrets that may be supplied as Docker secrets: VAR_FILE=/run/secrets/<name> wins over VAR.
-SECRET_FILE_VARS = ("PROXMOX_TOKEN_SECRET", "ANTHROPIC_API_KEY")
+SECRET_FILE_VARS = ("PROXMOX_TOKEN_SECRET", "ANTHROPIC_API_KEY", "WINDOWS_ADMIN_PASSWORD")
 
 
 def _secret_file_overrides() -> dict:
@@ -195,11 +206,39 @@ def public_settings(settings: Settings) -> dict:
     }
 
 
+# Templates the console can deploy. Linux templates are built automatically by
+# infra/platform from the official cloud images; Windows has no redistributable
+# cloud image, so its template is provided once (docs/windows-template.md).
 TEMPLATE_CATALOG = [
     {"key": "ubuntu-24-04", "label": "Ubuntu 24.04 LTS", "setting": "template_ubuntu_2404_id",
-     "image_setting": "ubuntu_2404_image_url"},
+     "image_setting": "ubuntu_2404_image_url", "os_family": "linux", "buildable": True},
     {"key": "debian-12", "label": "Debian 12", "setting": "template_debian_12_id",
-     "image_setting": "debian_12_image_url"},
+     "image_setting": "debian_12_image_url", "os_family": "linux", "buildable": True},
+    {"key": "windows-2022", "label": "Windows Server 2022", "setting": "template_windows_2022_id",
+     "image_setting": None, "os_family": "windows", "buildable": False},
 ]
+
+
+def template_entry(key: str) -> dict | None:
+    return next((t for t in TEMPLATE_CATALOG if t["key"] == key), None)
+
+
+# Software profiles = Ansible roles in infra/ansible/roles. A fixed catalog:
+# neither users nor the AI can run arbitrary commands through the console.
+PROFILE_CATALOG = [
+    {"key": "docker", "label": "Docker", "os_family": "linux", "port": None,
+     "description": "Docker Engine + Compose, ops user in the docker group"},
+    {"key": "nginx", "label": "Nginx web server", "os_family": "linux", "port": 80,
+     "description": "Nginx with a landing page on port 80"},
+    {"key": "postgresql", "label": "PostgreSQL", "os_family": "linux", "port": None,
+     "description": "PostgreSQL server, listening on localhost"},
+    {"key": "node_exporter", "label": "Monitoring agent", "os_family": "linux", "port": 9100,
+     "description": "Prometheus node exporter on port 9100"},
+    {"key": "iis", "label": "IIS web server", "os_family": "windows", "port": 80,
+     "description": "Internet Information Services with a landing page, firewall open on 80"},
+    {"key": "windows_tools", "label": "Admin tools", "os_family": "windows", "port": None,
+     "description": "7-Zip, Git and Notepad++ via Chocolatey"},
+]
+PROFILES = {p["key"]: p for p in PROFILE_CATALOG}
 
 NAME_PATTERN = r"^[a-z][a-z0-9-]{1,40}[a-z0-9]$"

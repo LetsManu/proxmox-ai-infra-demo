@@ -18,7 +18,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..config import ENVIRONMENTS, TEMPLATE_CATALOG, Settings
+from ..config import ENVIRONMENTS, PROFILE_CATALOG, TEMPLATE_CATALOG, Settings, template_entry
 from ..schemas import VmSpec
 
 HUMAN_APPROVAL_NOTE = ("A human must review and explicitly approve every production change. "
@@ -231,23 +231,28 @@ SPEC_SCHEMA = {
             "required": ["packages", "commands"],
             "additionalProperties": False,
         },
+        "profiles": {"type": "array", "items": {"type": "string", "enum": [p["key"] for p in PROFILE_CATALOG]}},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["name", "environment", "template", "cores", "memory_mb", "disk_gb", "network",
-                 "description", "cloud_init", "warnings"],
+                 "description", "cloud_init", "profiles", "warnings"],
     "additionalProperties": False,
 }
 
 
 def _spec_system() -> str:
     t = ENVIRONMENTS["test"]
-    templates = ", ".join(f"{x['key']} ({x['label']})" for x in TEMPLATE_CATALOG)
+    templates = ", ".join(f"{x['key']} ({x['label']}, {x['os_family']})" for x in TEMPLATE_CATALOG)
+    profiles = "; ".join(f"{p['key']} ({p['os_family']}): {p['description']}" for p in PROFILE_CATALOG)
     return f"""You convert a natural-language VM request into a JSON VM definition for a Proxmox platform.
-Allowed templates: {templates}. Name: lowercase letters, digits and hyphens, 3-42 chars, ends with
-"-test" for test VMs. environment is "test" unless the user explicitly asks for production.
+Allowed templates: {templates}. Name: lowercase letters, digits and hyphens, 3-42 chars (Windows: max 15),
+ends with "-test" for test VMs. environment is "test" unless the user explicitly asks for production.
 network must equal the environment ("test" or "prod"). TEST limits: max {t.max_cores} vCPU,
-{t.max_memory_mb} MB RAM, {t.max_disk_gb} GB disk. Always include "qemu-guest-agent" in packages.
-Use Debian/Ubuntu package names. Commands must be single-line, idempotent shell commands.
+{t.max_memory_mb} MB RAM, {t.max_disk_gb} GB disk.
+Software is installed by choosing profiles ONLY from this catalog, matching the template's OS family: {profiles}.
+Prefer profiles over packages. For Linux, packages are extra Debian/Ubuntu package names and must include
+"qemu-guest-agent"; commands must be single-line, idempotent shell commands. For Windows, packages and
+commands must be empty. If the request needs software that no profile covers, say so in warnings.
 Report anything you changed or could not satisfy in warnings. Never invent secrets or SSH keys."""
 
 
@@ -258,26 +263,28 @@ def _local_spec(prompt: str) -> dict:
         m = re.search(pattern, text)
         return int(m.group(1)) if m else default
 
-    template = "debian-12" if "debian" in text else "ubuntu-24-04"
+    windows = bool(re.search(r"\b(windows|win\s?server|iis)\b", text))
+    template = "windows-2022" if windows else "debian-12" if "debian" in text else "ubuntu-24-04"
     cores = num(r"(\d+)\s*(?:v?cpus?|cores?|vcores?)", 2)
     mem_gb = num(r"(\d+)\s*gb\s*(?:of\s*)?(?:ram|memory)", 4)
     disk = num(r"(\d+)\s*gb\s*(?:of\s*)?(?:disk|storage|ssd)", 32)
     env = "production" if re.search(r"\b(production|prod)\b", text) else "test"
-    packages = ["qemu-guest-agent"]
-    commands: list[str] = []
-    for word, pkg, cmd in [("docker", "docker.io", "systemctl enable --now docker"),
-                           ("nginx", "nginx", "systemctl enable --now nginx"),
-                           ("postgres", "postgresql", "systemctl enable --now postgresql"),
-                           ("git", "git", None), ("htop", "htop", None)]:
-        if re.search(rf"\b{word}", text):
-            packages.append(pkg)
-            if cmd:
-                commands.append(cmd)
-    purpose = "web" if re.search(r"\bweb", text) else "db" if "database" in text or "postgres" in text else "app"
-    return {"name": f"demo-{purpose}-test", "environment": env, "template": template, "cores": cores,
-            "memory_mb": mem_gb * 1024, "disk_gb": disk, "network": "test",
-            "description": prompt.strip()[:200],
-            "cloud_init": {"packages": packages, "commands": commands}, "warnings": []}
+    packages = [] if windows else ["qemu-guest-agent"]
+    profiles: list[str] = []
+    rules = ([(r"\b(iis|web)", "iis"), (r"\b(tools|git|7-?zip|chocolatey)", "windows_tools")] if windows else
+             [(r"\bdocker", "docker"), (r"\b(nginx|web)", "nginx"), (r"\b(postgres|database)", "postgresql"),
+              (r"\b(monitor|prometheus|metrics)", "node_exporter")])
+    for pattern, profile in rules:
+        if re.search(pattern, text) and profile not in profiles:
+            profiles.append(profile)
+    if not windows:
+        packages += [p for w, p in (("git", "git"), ("htop", "htop")) if re.search(rf"\b{w}\b", text)]
+    purpose = "web" if re.search(r"\bweb|\biis", text) else "db" if "database" in text or "postgres" in text else "app"
+    name = f"win-{purpose}-test" if windows else f"demo-{purpose}-test"
+    return {"name": name, "environment": env, "template": template, "cores": cores,
+            "memory_mb": mem_gb * 1024, "disk_gb": max(disk, 40) if windows else disk, "network": "test",
+            "description": prompt.strip()[:200], "profiles": profiles,
+            "cloud_init": {"packages": packages, "commands": []}, "warnings": []}
 
 
 def validate_generated_spec(raw: dict) -> dict:
@@ -293,10 +300,17 @@ def validate_generated_spec(raw: dict) -> dict:
     for cmd in ci.get("commands", []):
         if any(re.search(p, cmd) for p in DANGEROUS_COMMANDS):
             errors.append(f"Unsafe cloud-init command rejected: '{cmd}'")
-    if "qemu-guest-agent" not in ci.get("packages", []):
+    t = template_entry(str(raw.get("template", ""))) or {}
+    windows = t.get("os_family") == "windows"
+    if windows:
+        if ci.get("packages") or ci.get("commands"):
+            warnings.append("Windows software is installed through profiles; packages/commands were dropped.")
+        ci = {"packages": [], "commands": []}
+    elif "qemu-guest-agent" not in ci.get("packages", []):
         ci.setdefault("packages", []).append("qemu-guest-agent")
         warnings.append("Added qemu-guest-agent (required for IP reporting and validation).")
     raw["cloud_init"] = ci
+    raw["profiles"] = list(dict.fromkeys(raw.get("profiles") or []))
     policy = ENVIRONMENTS["test"]
     for key, limit, unit in (("cores", policy.max_cores, "vCPU"), ("memory_mb", policy.max_memory_mb, "MB RAM"),
                              ("disk_gb", policy.max_disk_gb, "GB disk")):
@@ -304,6 +318,9 @@ def validate_generated_spec(raw: dict) -> dict:
             errors.append(f"Test: max {limit} {unit} (requested {raw[key]})")
     if not str(raw.get("name", "")).endswith("-test"):
         raw["name"] = re.sub(r"[^a-z0-9-]", "-", str(raw.get("name", "vm")).lower()).strip("-")[:37] + "-test"
+    if windows and len(raw["name"]) > 15:
+        raw["name"] = raw["name"][:10].rstrip("-") + "-test"
+        warnings.append("Shortened the name: Windows computer names are limited to 15 characters.")
     if errors:
         raise SpecRejected(errors, raw)
     try:
@@ -354,6 +371,21 @@ recreating the VM is appropriate (only for stateless/disposable VMs) and whether
 stateful, requiring backup/restore instead. Never recommend deleting production data."""
 
 _RULES: list[tuple[str, dict]] = [
+    (r"template .* does not exist|prepare the platform", {
+        "likely_cause": "The template for this OS has not been built on the node yet.",
+        "immediate_checks": ["Open the Platform panel and look for missing resources"],
+        "safe_remediation_steps": ["Click Prepare Platform: OpenTofu downloads the cloud image and builds the template",
+                                   "For Windows, provide the template once (docs/windows-template.md)"],
+        "recreate_appropriate": False}),
+    (r"ansible-playbook failed|unreachable=[1-9]|winrm|configuration failed", {
+        "likely_cause": "Ansible could not finish the software configuration (VM unreachable over SSH/WinRM, "
+                        "or a package/feature install failed).",
+        "immediate_checks": ["Read the TASK that failed in the job log",
+                             "Linux: ssh with the console key to the VM IP; Windows: Test-WSMan on port 5986",
+                             "Check DNS and outbound HTTP from the VM (package mirrors, Chocolatey)"],
+        "safe_remediation_steps": ["Fix the cause, then use Configure to re-run (it is idempotent)",
+                                   "If the VM is disposable and the failure persists, recreate it"],
+        "recreate_appropriate": False}),
     (r"401|token|authentication", {
         "likely_cause": "Proxmox API token rejected (wrong user, token ID or secret, or token expired).",
         "immediate_checks": ["Verify PROXMOX_USER uses USER@REALM format (e.g. automation@pve)",

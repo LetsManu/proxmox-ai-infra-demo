@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0 – 2026-10-18
+
+The console now creates everything it needs and configures the VMs it deploys.
+
+- **Bootstrap stack** (`infra/bootstrap`, `infra/scripts/bootstrap.sh`): least-privilege user, role, privilege-separated API token and ACLs, resource pool, image/snippet directory storage, SDN VLAN zone with `vtest`/`vprod` vnets. Run once by an admin; the console never holds admin credentials. The token secret lands in `secrets/`.
+- **Platform stack** (`infra/platform`): downloads the official Ubuntu/Debian cloud images and builds the templates as code. New *Platform* panel and workflow step: resource status, *Prepare Platform* (plan) and *Build templates* (apply). Generating a VM plan waits until its template exists.
+- **Software configuration with Ansible** (`infra/ansible`) for Linux (SSH) and Windows (WinRM): base role plus profiles `docker`, `nginx`, `postgresql`, `node_exporter`, `iis`, `windows_tools`. Runs after deploy, recreate and approved promotion; *Configure* re-runs it. Validation checks *Software configured*.
+- **Windows Server 2022** template support (provided once, cloudbase-init, Administrator password via secret, 15-character names).
+- AI drafts pick software only from the profile catalog and recognise Windows requests.
+- VMs join the resource pool; Linux VMs get a guest-agent vendor snippet when a snippet store is configured.
+- CI validates all three stacks and the playbook syntax.
+
 ## 1.1.0 – 2026-10-18
 
 - Console redesign in the style of the Proxmox VE / Datacenter Manager dark theme: top bar with Tasks and user buttons, Server View resource tree (Datacenter › node › Test / Production › VMs, templates, storage), toolbar actions, light-blue panel titles, 13px Helvetica/Arial. Contrast-checked tokens, Lucide SVG icons instead of emoji, monospace bundled offline.

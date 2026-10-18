@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .config import ENVIRONMENTS, NAME_PATTERN, TEMPLATE_CATALOG, normalize_env
+from .config import ENVIRONMENTS, NAME_PATTERN, PROFILES, TEMPLATE_CATALOG, normalize_env, template_entry
 
 TEMPLATE_KEYS = {t["key"] for t in TEMPLATE_CATALOG}
 NETWORKS = {"test": "test", "prod": "prod"}
@@ -48,7 +48,13 @@ class VmSpec(BaseModel):
     description: str = Field(default="", max_length=500)
     ssh_public_key: str = Field(default="", max_length=4096)
     cloud_init: CloudInit = Field(default_factory=CloudInit)
+    profiles: list[str] = Field(default_factory=list, max_length=10)
     tags: list[str] = Field(default_factory=list, max_length=10)
+
+    @property
+    def os_family(self) -> str:
+        t = template_entry(self.template)
+        return t["os_family"] if t else "linux"
 
     @field_validator("environment")
     @classmethod
@@ -99,6 +105,21 @@ class VmSpec(BaseModel):
                 f"Network '{self.network}' is not allowed in {policy.label}; "
                 f"use '{NETWORKS[self.environment]}'"
             )
+        os_family = self.os_family
+        for p in self.profiles:
+            prof = PROFILES.get(p)
+            if not prof:
+                errors.append(f"Unknown software profile '{p}'. Allowed: {sorted(PROFILES)}")
+            elif prof["os_family"] != os_family:
+                errors.append(f"Profile '{p}' is for {prof['os_family']}, but {self.template} is {os_family}")
+        if len(set(self.profiles)) != len(self.profiles):
+            errors.append("Profiles must not repeat")
+        if os_family == "windows":
+            if len(self.name) > 15:
+                errors.append("Windows computer names are limited to 15 characters")
+            # cloud-init packages and SSH keys do not apply to Windows; software comes from profiles
+            self.cloud_init = CloudInit()
+            self.ssh_public_key = ""
         if errors:
             raise ValueError("; ".join(errors))
         return self
@@ -145,6 +166,21 @@ class RecreateRequest(ApprovalFields):
     @classmethod
     def _env(cls, v: str) -> str:
         return normalize_env(v)
+
+
+class ConfigureRequest(BaseModel):
+    name: str = Field(pattern=NAME_PATTERN)
+    environment: str = "test"
+
+    @field_validator("environment")
+    @classmethod
+    def _env(cls, v: str) -> str:
+        return normalize_env(v)
+
+
+class PlatformApplyRequest(BaseModel):
+    plan_job_id: str
+    confirm_destroy: bool = False
 
 
 class PowerRequest(BaseModel):
@@ -227,4 +263,6 @@ class VmOut(BaseModel):
     ip_address: str | None
     last_validation: str | None
     last_validation_at: datetime | None
+    config_status: str | None
+    configured_at: datetime | None
     deployed_at: datetime | None

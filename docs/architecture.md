@@ -36,6 +36,17 @@ flowchart TB
     runner --> db
 ```
 
+## Three stacks, three owners
+
+| Stack | Path | Run by | Credentials | Creates |
+|---|---|---|---|---|
+| Bootstrap | `infra/bootstrap` | an admin, once, `infra/scripts/bootstrap.sh` | admin (shell env only) | role, user, token, ACLs, pool, image/snippet storage, SDN zone + vnets |
+| Platform | `infra/platform` | the console (*Prepare Platform*) | least-privilege token | cloud-image downloads, Linux templates |
+| VMs | `infra` + `environments/*.tfvars` | the console (plan/deploy/promote/recreate) | least-privilege token | VMs (TEST and PROD state separate) |
+
+After a VM stack apply, `services/config_service.py` runs Ansible (`infra/ansible/site.yml`) against the new
+VM: SSH for Linux, WinRM for Windows, base role plus the VM's profiles.
+
 ## Data model
 
 | Table | Purpose |

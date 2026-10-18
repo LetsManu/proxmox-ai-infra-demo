@@ -21,7 +21,7 @@ from ..database import session_scope
 from ..models import Job, JobStatus
 from ..schemas import ApprovalFields, JobCreated, PromotionRequest, VmSpec
 from ..workers.job_runner import JobContext, JobOutcome, add_history, create_job, submit
-from .plans import apply_plan, get_vm, plan_job_or_404, run_plan
+from .plans import apply_plan, configure, get_vm, plan_job_or_404, run_plan
 
 router = APIRouter(prefix="/api", tags=["promotion"])
 
@@ -119,6 +119,7 @@ def promote(req: PromotionRequest):
         apply_plan(ctx, s, "prod", job.result["plan"], spec, vmid=job.result["vmid"],
                    template_id=job.result["template_id"])
         ctx.update_result(summary=job.result["plan"]["summary"])
+        configure(ctx, s, "prod", spec["name"])
         ctx.log("Production deployment complete. Run Validate against PRODUCTION to confirm.")
         return job.result["plan"]["summary"]
 

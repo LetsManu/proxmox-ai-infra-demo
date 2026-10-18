@@ -47,6 +47,23 @@ def init_db() -> None:
     from . import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Tiny forward-only migration: add columns introduced after a database was created."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in existing:
+                    ddl = col.type.compile(dialect=engine.dialect)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}'))
 
 
 @contextmanager

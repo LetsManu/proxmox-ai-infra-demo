@@ -2,6 +2,26 @@
 
 Checklist for a Proxmox VE 8.x/9.x node before the console runs in live mode. Names below are examples; use your own and mirror them in `.env`.
 
+## 0. Recommended: bootstrap with OpenTofu
+
+`infra/scripts/bootstrap.sh` creates sections 1–3 for you (user, role, token, ACLs, pool, an image/snippet
+directory storage `infra-demo`, an SDN VLAN zone `infrazn` with vnets `vtest` (VLAN 30) and `vprod` (VLAN 10)).
+It runs from an admin's workstation with admin credentials in the shell environment only, shows the plan,
+asks you to type `BOOTSTRAP`, writes the token secret to `secrets/proxmox_token_secret` and prints the `.env` values.
+
+```bash
+export PROXMOX_VE_ENDPOINT=https://<proxmox-host>:8006/ PROXMOX_VE_USERNAME=root@pam
+read -rs PROXMOX_VE_PASSWORD && export PROXMOX_VE_PASSWORD
+infra/scripts/bootstrap.sh -var node_name=pve -var pve_major=8 -var 'vm_storages=["local-lvm"]'
+```
+
+Variables (see `infra/bootstrap/variables.tf`): `create_sdn=false` keeps plain bridges, `create_image_storage=false`
+reuses an existing storage, `token_expiration_date` limits the token's lifetime. The bootstrap state
+(`infra/bootstrap/terraform.tfstate`, gitignored) contains the token secret: keep it private.
+The VLAN-aware bridge, switch trunking, DHCP and firewalling (sections 3, 7) remain your job.
+
+The manual steps below do the same by hand.
+
 ## 1. Automation user and API token
 
 Follow [api-token-setup.md](api-token-setup.md). Summary:

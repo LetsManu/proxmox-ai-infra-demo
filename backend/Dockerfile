@@ -8,7 +8,9 @@ ARG TARGETARCH=amd64
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    TF_PLUGIN_CACHE_DIR=/opt/tofu-plugin-cache
+    TF_PLUGIN_CACHE_DIR=/opt/tofu-plugin-cache \
+    ANSIBLE_LOCAL_TEMP=/tmp/ansible \
+    ANSIBLE_HOME=/tmp/ansible-home
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl unzip jq openssh-client \
@@ -31,16 +33,21 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY infra /app/infra
-# Pre-download the bpg/proxmox provider so live plans work without registry access.
+# Pre-download the bpg/proxmox provider (VM and platform stacks) and the Ansible
+# collections so live runs work without registry/galaxy access.
 RUN mkdir -p "$TF_PLUGIN_CACHE_DIR" \
- && TF_DATA_DIR=/tmp/tfinit tofu -chdir=/app/infra init -backend=false -input=false -no-color \
- && rm -rf /tmp/tfinit
+ && for d in /app/infra /app/infra/platform; do \
+      TF_DATA_DIR=/tmp/tfinit tofu -chdir="$d" init -backend=false -input=false -no-color && rm -rf /tmp/tfinit; \
+    done \
+ && ansible-galaxy collection install -r /app/infra/ansible/requirements.yml -p /usr/share/ansible/collections \
+ && rm -rf /tmp/ansible /tmp/ansible-home
 
 COPY backend/app /app/app
 
 RUN useradd --system --uid 10001 --home /app app \
  && mkdir -p /data /workspace \
- && chown -R app:app /data /workspace /app/infra /opt/tofu-plugin-cache
+ && chown -R app:app /data /workspace /app/infra /opt/tofu-plugin-cache \
+ && rm -rf /app/infra/bootstrap  # admin-only stack: never inside the console image
 USER app
 
 EXPOSE 8000

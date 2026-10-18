@@ -11,5 +11,7 @@ os.environ.update({
     "MOCK_SPEED": "50",
     "AI_PROVIDER": "none",
     "ANTHROPIC_API_KEY": "",
+    "UBUNTU_2404_IMAGE_URL": "https://images.example.invalid/noble-server-cloudimg-amd64.img",
+    "DEBIAN_12_IMAGE_URL": "https://images.example.invalid/debian-12-genericcloud-amd64.qcow2",
 })
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

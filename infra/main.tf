@@ -28,6 +28,10 @@ module "vm" {
   snippets_datastore_id = var.snippets_datastore_id
   packages              = each.value.packages
   commands              = each.value.commands
+
+  pool_id        = var.pool_id
+  os_family      = each.value.os_family
+  admin_password = each.value.os_family == "windows" ? var.windows_admin_password : ""
 }
 
 # Policy guardrails evaluated on every plan.

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Layers, FlaskConical, Radio, Boxes, Bot, ListTodo, User, Menu, Play, ShieldCheck, Activity, FileCode, RotateCcw } from 'lucide-vue-next'
+import { Layers, FlaskConical, Radio, Boxes, Bot, ListTodo, User, Menu, Play, ShieldCheck, Activity, FileCode, RotateCcw, Wrench } from 'lucide-vue-next'
 import { api, pollJob } from './api.js'
 import VmCreateForm from './components/VmCreateForm.vue'
 import PlanPanel from './components/PlanPanel.vue'
@@ -11,6 +11,7 @@ import JobLogPanel from './components/JobLogPanel.vue'
 import HistoryTable from './components/HistoryTable.vue'
 import WorkflowSteps from './components/WorkflowSteps.vue'
 import ResourceTree from './components/ResourceTree.vue'
+import PlatformPanel from './components/PlatformPanel.vue'
 import Skeleton from './components/ui/Skeleton.vue'
 import ToastHost from './components/ui/ToastHost.vue'
 import ConfirmDialog from './components/ui/ConfirmDialog.vue'
@@ -25,6 +26,9 @@ const environments = ref([])
 const vms = ref(null)
 const history = ref(null)
 const historyError = ref('')
+const platform = ref(null)
+const profiles = ref([])
+const platformPlanJob = ref(null)
 
 const form = reactive({
   name: 'demo-web-test',
@@ -36,6 +40,7 @@ const form = reactive({
   description: '',
   ssh_public_key: '',
   cloud_init: { packages: ['qemu-guest-agent'], commands: [] },
+  profiles: [],
 })
 
 const planJob = ref(null)
@@ -64,10 +69,12 @@ const prodName = computed(() => form.name.replace(/-test$/, ''))
 const testVm = computed(() => vmList.value.find((v) => v.name === testName.value && v.environment === 'test'))
 const prodVm = computed(() => vmList.value.find((v) => v.name === prodName.value && v.environment === 'prod'))
 const isMock = computed(() => health.value && !health.value.settings.live_mode)
+const selectedTemplate = computed(() => (templates.value || []).find((t) => t.key === form.template))
+const templateReady = computed(() => selectedTemplate.value?.available !== false)
 const awaiting = computed(() => approvalJob.value?.status === 'awaiting_approval')
 
 const can = computed(() => ({
-  plan: !busy.value,
+  plan: !busy.value && templateReady.value,
   deploy:
     !busy.value &&
     env.value === 'test' &&
@@ -77,6 +84,7 @@ const can = computed(() => ({
     planMatchesForm.value &&
     !planJob.value?.result?.applied,
   validate: !busy.value && !!currentVm.value,
+  configure: !busy.value && !!currentVm.value && env.value === 'test',
   promote: !busy.value && testVm.value?.last_validation === 'PASS' && !awaiting.value,
   recreate: !busy.value && !!currentVm.value,
 }))
@@ -93,6 +101,8 @@ const hints = computed(() => ({
             ? 'This plan was already applied'
             : '',
   validate: currentVm.value ? '' : `Deploy ${form.name} first`,
+  plan: templateReady.value ? '' : 'The template for this OS is missing. Prepare the platform first.',
+  configure: currentVm.value ? (env.value === 'test' ? '' : 'Production is configured by approved changes') : `Deploy ${form.name} first`,
   promote: awaiting.value
     ? 'A promotion is waiting for approval'
     : testVm.value?.last_validation === 'PASS'
@@ -112,7 +122,9 @@ const steps = computed(() => {
   const planned = planJob.value?.status === 'success' && planJob.value.environment === 'test'
   const deployed = !!testVm.value
   const validation = testVm.value?.last_validation
+  const missing = (platform.value?.resources || []).filter((r) => r.status === 'missing').length
   const s = [
+    { key: 'platform', label: 'Platform', detail: templateReady.value ? (missing ? `${missing} optional missing` : 'Ready') : 'Template missing', done: templateReady.value },
     { key: 'define', label: 'Define', detail: testName.value, done: true },
     { key: 'plan', label: 'Plan', detail: planned ? planDetail(planJob.value.result?.plan?.counts) : '', done: planned || deployed },
     { key: 'deploy', label: 'Deploy to Test', detail: deployed ? `VMID ${testVm.value.vmid}` : '', done: deployed },
@@ -139,7 +151,7 @@ const steps = computed(() => {
 const nextAction = computed(() => {
   const cur = steps.value.find((s) => s.state === 'current' || s.state === 'error')?.key
   if (env.value === 'prod' || awaiting.value) return null
-  return { plan: 'plan', define: 'plan', deploy: can.value.deploy ? 'deploy' : 'plan', validate: 'validate', approve: 'promote' }[cur] || null
+  return { platform: 'platform', plan: 'plan', define: 'plan', deploy: can.value.deploy ? 'deploy' : 'plan', validate: 'validate', approve: 'promote' }[cur] || null
 })
 
 watch(env, (e) => {
@@ -161,12 +173,64 @@ async function refresh() {
   }
 }
 
+async function refreshPlatform() {
+  try {
+    ;[platform.value, templates.value] = await Promise.all([api.platform(), api.templates()])
+  } catch (e) {
+    toast.error(e.message, { title: 'Platform status unavailable' })
+  }
+}
+
+async function platformPlan() {
+  const job = await track('platform-plan', () => api.platformPlan())
+  if (job) platformPlanJob.value = job
+  if (job?.status === 'failed') toast.error(job.error || 'Platform plan failed', { title: 'Platform plan failed' })
+}
+
+async function platformApply() {
+  const plan = platformPlanJob.value.result.plan
+  if (plan.has_destroy) {
+    const ok = await confirm({
+      title: 'Apply a destructive platform change?',
+      body: 'This plan destroys platform resources (images or templates). Linked clones may depend on them.',
+      danger: true,
+      typed: 'PLATFORM',
+      confirmLabel: 'Apply',
+    })
+    if (!ok) return
+  }
+  const job = await track('platform-apply', () => api.platformApply(platformPlanJob.value.id, plan.has_destroy))
+  if (job?.status === 'success') {
+    platformPlanJob.value = { ...platformPlanJob.value, result: { ...platformPlanJob.value.result, applied: true } }
+    toast.success(plan.summary, { title: 'Platform built' })
+  } else if (job) toast.error(job.error || 'Apply failed', { title: 'Platform build failed' })
+  await refreshPlatform()
+}
+
+async function configureVm() {
+  const job = await track('configure', () => api.configure({ name: form.name, environment: env.value }))
+  if (job?.status === 'success') toast.success(job.result?.config_status === 'skipped' ? 'Skipped: no credentials configured.' : 'Software configuration applied.', { title: 'Configure' })
+  else if (job) toast.error(job.error || 'Configuration failed', { title: 'Configuration failed' })
+}
+
+// Health-check default follows the OS and the chosen software
+watch(
+  () => [form.template, form.profiles.join()],
+  () => {
+    const win = selectedTemplate.value?.os_family === 'windows'
+    const web = form.profiles.includes('nginx') || form.profiles.includes('iis')
+    validateOpts.port = web ? 80 : win ? 5986 : 22
+  },
+)
+
 async function loadInventory() {
   try {
-    ;[health.value, templates.value, environments.value] = await Promise.all([
+    ;[health.value, templates.value, environments.value, profiles.value, platform.value] = await Promise.all([
       api.health(),
       api.templates(),
       api.environments(),
+      api.profiles(),
+      api.platform(),
     ])
     pxStatus.value = await api.proxmoxStatus()
   } catch (e) {
@@ -325,6 +389,7 @@ function applyGeneratedSpec(s) {
     network: s.network,
     description: s.description || '',
     cloud_init: s.cloud_init,
+    profiles: s.profiles || [],
   })
   toast.info('Review the values, then generate a plan.', { title: 'Draft applied' })
 }
@@ -341,6 +406,7 @@ function selectVm(vm) {
     description: vm.spec.description || '',
     ssh_public_key: vm.spec.ssh_public_key || '',
     cloud_init: vm.spec.cloud_init || { packages: [], commands: [] },
+    profiles: vm.spec.profiles || [],
   })
   treeOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -380,7 +446,7 @@ onUnmounted(() => clearInterval(timer))
     <div class="brand">
       <span class="logo" aria-hidden="true"><Layers :size="17" /></span>
       <span class="name">Infra Console</span>
-      <span class="version">1.1.0</span>
+      <span class="version">1.2.0</span>
     </div>
     <div class="bar-right">
       <template v-if="health">
@@ -427,11 +493,14 @@ onUnmounted(() => clearInterval(timer))
           </button>
         </div>
         <div class="actions">
-          <button class="btn" :class="{ primary: nextAction === 'plan' }" :disabled="!can.plan" :aria-busy="busy === 'plan'" @click="generatePlan">
+          <button class="btn" :class="{ primary: nextAction === 'plan' }" :disabled="!can.plan" :title="hints.plan" :aria-busy="busy === 'plan'" @click="generatePlan">
             <span v-if="busy === 'plan'" class="spinner" /><FileCode v-else :size="14" />Generate Plan
           </button>
           <button class="btn" :class="{ primary: nextAction === 'deploy' }" :disabled="!can.deploy" :title="hints.deploy" :aria-busy="busy === 'deploy'" @click="deployTest">
             <span v-if="busy === 'deploy'" class="spinner" /><Play v-else :size="14" />Deploy to Test
+          </button>
+          <button class="btn" :disabled="!can.configure" :title="hints.configure" :aria-busy="busy === 'configure'" @click="configureVm">
+            <span v-if="busy === 'configure'" class="spinner" /><Wrench v-else :size="14" />Configure
           </button>
           <button class="btn" :class="{ primary: nextAction === 'validate' }" :disabled="!can.validate" :title="hints.validate" :aria-busy="busy === 'validate'" @click="validate">
             <span v-if="busy === 'validate'" class="spinner" /><Activity v-else :size="14" />Validate
@@ -444,7 +513,8 @@ onUnmounted(() => clearInterval(timer))
           </button>
         </div>
       </div>
-      <p v-if="env === 'test' && planJob && hints.deploy && ['plan', 'deploy'].includes(nextAction)" class="hint">{{ hints.deploy }}</p>
+      <p v-if="!templateReady" class="hint">{{ hints.plan }}</p>
+      <p v-else-if="env === 'test' && planJob && hints.deploy && ['plan', 'deploy'].includes(nextAction)" class="hint">{{ hints.deploy }}</p>
       <p v-else-if="env === 'prod'" class="hint">Production VMs are created only by promoting a validated Test VM.</p>
 
       <WorkflowSteps :steps="steps" />
@@ -456,12 +526,21 @@ onUnmounted(() => clearInterval(timer))
             :env="env"
             :policy="policy"
             :templates="templates"
+            :profiles="profiles"
             :environments="environments"
             @apply-spec="applyGeneratedSpec"
           />
         </div>
 
         <div class="col-right">
+          <PlatformPanel
+            :status="platform"
+            :plan-job="platformPlanJob"
+            :busy="busy"
+            @plan="platformPlan"
+            @apply="platformApply"
+            @refresh="refreshPlatform"
+          />
           <PlanPanel :job="planJob" :stale="!!planJob && planJob.action === 'plan' && !planMatchesForm" :busy="busy === 'plan'" />
           <AiSummaryPanel :summary="planSummary" :loading="summaryLoading" />
           <ValidationPanel

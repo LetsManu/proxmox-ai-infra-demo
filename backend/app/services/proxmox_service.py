@@ -143,31 +143,22 @@ class ProxmoxClient:
         except ProxmoxError:
             return False
 
-    def create_template_from_image(self, *, vmid: int, name: str, image_url: str, image_storage: str,
-                                   disk_storage: str, bridge: str, ci_user: str, ssh_public_key: str,
-                                   log=print) -> dict:
-        """API-only variant of infra/scripts/create-cloudinit-template.sh (requires PVE 8.4+
-        for the `import` content type). The shell script is the recommended path."""
-        filename = f"{name}.qcow2"
-        log(f"Downloading {image_url} to {image_storage}:import/{filename}")
-        self.wait_task(self.post(f"/nodes/{self.node}/storage/{image_storage}/download-url",
-                                 {"url": image_url, "content": "import", "filename": filename}), timeout=1800)
-        log(f"Creating VM {vmid} ({name})")
-        self.wait_task(self.post(f"/nodes/{self.node}/qemu", {
-            "vmid": vmid, "name": name, "memory": 2048, "cores": 2, "cpu": "x86-64-v2-AES",
-            "net0": f"virtio,bridge={bridge}", "scsihw": "virtio-scsi-single",
-            "scsi0": f"{disk_storage}:0,import-from={image_storage}:import/{filename},discard=on",
-            "ide2": f"{disk_storage}:cloudinit", "boot": "order=scsi0", "serial0": "socket",
-            "vga": "serial0", "agent": "enabled=1", "ostype": "l26", "ipconfig0": "ip=dhcp",
-            "ciuser": ci_user,
-        }))
-        if ssh_public_key:
-            from urllib.parse import quote
+    def guest_os(self, vmid: int) -> str | None:
+        """Guest OS name reported by the agent (used for Windows readiness)."""
+        try:
+            info = self.get(f"/nodes/{self.node}/qemu/{vmid}/agent/get-osinfo") or {}
+            return (info.get("result") or {}).get("pretty-name") or "unknown"
+        except ProxmoxError:
+            return None
 
-            self.put(f"/nodes/{self.node}/qemu/{vmid}/config", {"sshkeys": quote(ssh_public_key, safe="")})
-        log("Converting to template")
-        self.post(f"/nodes/{self.node}/qemu/{vmid}/template")
-        return {"template_id": vmid, "name": name}
+    def list_pools(self) -> list[str]:
+        return [p["poolid"] for p in self.get("/pools") or []]
+
+    def list_vnets(self) -> list[str]:
+        try:
+            return [v["vnet"] for v in self.get("/cluster/sdn/vnets") or []]
+        except ProxmoxError:
+            return []  # SDN not configured or no SDN.Audit
 
 
 class MockProxmox:
@@ -179,10 +170,15 @@ class MockProxmox:
         self.s = settings
         self.node = settings.proxmox_node
         self.vms: dict[int, dict] = {}
-        self.templates = {
-            settings.template_ubuntu_2404_id: "tmpl-ubuntu-24-04",
-            settings.template_debian_12_id: "tmpl-debian-12",
-        }
+        # The Windows template is "provided once" by an admin, so it exists from the start.
+        # Linux templates are built by the platform stack unless MOCK_PLATFORM_READY=true.
+        self.templates = {settings.template_windows_2022_id: "tmpl-windows-2022"}
+        self.templates.update(self._load_built())
+        if settings.mock_platform_ready:
+            self.templates.update({
+                settings.template_ubuntu_2404_id: "tmpl-ubuntu-24-04",
+                settings.template_debian_12_id: "tmpl-debian-12",
+            })
 
     def version(self) -> dict:
         return {"version": "8.4.1", "release": "8.4", "repoid": "mock"}
@@ -196,10 +192,43 @@ class MockProxmox:
              "avail": 80 * 2**30, "total": 100 * 2**30},
             {"storage": "local-lvm", "type": "lvmthin", "content": "images,rootdir",
              "avail": 700 * 2**30, "total": 900 * 2**30},
-        ]
+        ] + ([{"storage": self.s.image_storage, "type": "dir", "content": "import,iso,snippets",
+               "avail": 90 * 2**30, "total": 100 * 2**30}] if self.s.image_storage not in ("local", "local-lvm") else [])
 
     def list_bridges(self) -> list[dict]:
         return [{"iface": "vmbr0", "type": "bridge", "comments": "VLAN-aware: 10=prod, 30=test"}]
+
+    def list_pools(self) -> list[str]:
+        return [self.s.pool_id] if self.s.pool_id else []
+
+    def list_vnets(self) -> list[str]:
+        return [b for b in (self.s.test_bridge, self.s.prod_bridge) if b.startswith("v") and b != "vmbr0"]
+
+    # Templates "built" by the mock platform stack survive restarts (like real ones would).
+    def _built_file(self) -> str:
+        import os
+
+        return os.path.join(self.s.workspace_dir, "state", "platform", "mock-templates.json")
+
+    def _load_built(self) -> dict[int, str]:
+        import json
+
+        try:
+            with open(self._built_file()) as fh:
+                return {int(k): v for k, v in json.load(fh).items()}
+        except (OSError, ValueError):
+            return {}
+
+    def add_template(self, vmid: int, name: str) -> None:
+        import json
+        import os
+
+        self.templates[vmid] = name
+        built = self._load_built()
+        built[vmid] = name
+        os.makedirs(os.path.dirname(self._built_file()), exist_ok=True)
+        with open(self._built_file(), "w") as fh:
+            json.dump(built, fh)
 
     def list_vms(self) -> list[dict]:
         rows = [{"vmid": k, "name": v, "template": 1, "type": "qemu", "node": self.node}
@@ -217,11 +246,11 @@ class MockProxmox:
     def used_vmids(self) -> set[int]:
         return set(self.templates) | set(self.vms)
 
-    def register_vm(self, vmid: int, name: str, env: str, fail: bool = False) -> None:
+    def register_vm(self, vmid: int, name: str, env: str, fail: bool = False, windows: bool = False) -> None:
         net = "192.0.2" if env == "test" else "198.51.100"  # RFC 5737 documentation ranges
         with self._lock:
             self.vms[vmid] = {"name": name, "status": "running", "started": time.time(),
-                              "ip": f"{net}.{random.randint(20, 220)}", "fail": fail}
+                              "ip": f"{net}.{random.randint(20, 220)}", "fail": fail, "windows": windows}
 
     def clone_vm(self, template_id: int, new_id: int, name: str, full: bool, storage: str | None = None) -> None:
         self.register_vm(new_id, name, "test")
@@ -255,17 +284,15 @@ class MockProxmox:
         vm = self.vms.get(vmid)
         return bool(vm and vm["status"] == "running" and not vm.get("fail"))
 
+    def guest_os(self, vmid: int) -> str | None:
+        vm = self.vms.get(vmid)
+        if not vm or vm["status"] != "running":
+            return None
+        return "Microsoft Windows Server 2022 Standard" if vm.get("windows") else "Ubuntu 24.04 LTS"
+
     def set_failure(self, vmid: int, fail: bool) -> None:
         if vmid in self.vms:
             self.vms[vmid]["fail"] = fail
-
-    def create_template_from_image(self, *, vmid: int, name: str, image_url: str, log=print, **_) -> dict:
-        for step in ("Downloading cloud image", "Creating temporary VM", "Importing disk as scsi0",
-                     "Adding cloud-init drive", "Enabling QEMU guest agent", "Converting to template"):
-            log(f"[mock] {step}")
-            time.sleep(0.3 / max(self.s.mock_speed, 0.01))
-        self.templates[vmid] = name
-        return {"template_id": vmid, "name": name}
 
 
 _mock_singleton: MockProxmox | None = None

@@ -1,0 +1,23 @@
+- name: QEMU guest agent running
+  ansible.windows.win_service:
+    name: QEMU-GA
+    start_mode: auto
+    state: started
+
+- name: Set time zone to UTC
+  ansible.windows.win_powershell:
+    script: |
+      if ((Get-TimeZone).Id -ne 'UTC') { Set-TimeZone -Id 'UTC'; $Ansible.Changed = $true } else { $Ansible.Changed = $false }
+
+- name: Allow ICMP echo for monitoring
+  ansible.windows.win_powershell:
+    script: |
+      if (-not (Get-NetFirewallRule -Name 'infra-demo-icmp' -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -Name 'infra-demo-icmp' -DisplayName 'ICMPv4 echo (infra-demo)' -Protocol ICMPv4 -IcmpType 8 -Action Allow | Out-Null
+        $Ansible.Changed = $true
+      } else { $Ansible.Changed = $false }
+
+- name: Record managed state
+  ansible.windows.win_copy:
+    dest: C:\ProgramData\infra-demo.json
+    content: "{{ {'profiles': profiles | default([]), 'configured_by': 'proxmox-ai-infra-demo'} | to_nice_json }}"

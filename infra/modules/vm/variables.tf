@@ -133,3 +133,27 @@ variable "commands" {
   type        = list(string)
   default     = []
 }
+
+variable "pool_id" {
+  description = "Resource pool ('' = none)."
+  type        = string
+  default     = ""
+}
+
+variable "os_family" {
+  description = "linux (cloud-init) or windows (cloudbase-init)."
+  type        = string
+  default     = "linux"
+
+  validation {
+    condition     = contains(["linux", "windows"], var.os_family)
+    error_message = "os_family must be linux or windows."
+  }
+}
+
+variable "admin_password" {
+  description = "Windows: local Administrator password set by cloudbase-init (used by Ansible over WinRM)."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

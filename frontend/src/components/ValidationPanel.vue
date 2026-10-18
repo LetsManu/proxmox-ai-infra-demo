@@ -23,9 +23,10 @@ const validation = computed(() =>
 )
 const CHECKS = [
   { name: 'vm_running', label: 'VM is running' },
-  { name: 'cloud_init_completed', label: 'Cloud-init finished' },
+  { name: 'cloud_init_completed', label: 'Guest setup finished' },
   { name: 'guest_agent_ip', label: 'Guest agent reports an IP' },
   { name: 'service_health', label: 'Service responds' },
+  { name: 'configuration_applied', label: 'Software configured' },
 ]
 const rows = computed(() => {
   const byName = Object.fromEntries((validation.value?.checks || []).map((c) => [c.name, c]))
@@ -47,7 +48,7 @@ const overall = computed(() => validation.value?.overall || props.vm?.last_valid
     <div class="card-body">
       <p v-if="!vm" class="empty">
         <Activity :size="18" />
-        <span>Once the VM is deployed, validation checks that it booted, cloud-init finished and the guest agent reports an address.</span>
+        <span>Once the VM is deployed, validation checks that it booted, setup finished, the guest agent reports an address and the software was configured.</span>
       </p>
       <template v-else>
         <p class="target small">

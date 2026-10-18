@@ -19,7 +19,7 @@ from ..database import session_scope
 from ..models import HistoryEntry, Job, JobStatus
 
 _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="job")
-_env_locks = {"test": threading.Lock(), "prod": threading.Lock()}
+_env_locks = {"test": threading.Lock(), "prod": threading.Lock(), "infra": threading.Lock()}
 
 
 class JobContext:
