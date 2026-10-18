@@ -43,9 +43,9 @@ docker compose up -d
 docker compose ps          # both services "healthy"
 ```
 
-Open `http://localhost:8080`. Point at the header and the progress bar below it:
+Open `http://localhost:8080`. It looks like the Proxmox UI on purpose: resource tree on the left (Datacenter › node › Test / Production › VMs, templates, storage), actions top right. Point at the top bar and the progress bar:
 
-> "Top right: mode (Live or Mock), the Proxmox version and node, OpenTofu, which assistant (Claude or local rules), and who I am for the audit trail. The bar underneath tracks this VM from definition to production; the highlighted orange button is always the next step."
+> "Top right: mode (Live or Mock), the Proxmox version and node, OpenTofu, which assistant (Claude or local rules), running tasks, and who I am for the audit trail. The progress bar tracks this VM from definition to production; the blue button is always the next step."
 
 ## 3:00 AI drafts a VM (AI moment 1)
 
@@ -117,7 +117,7 @@ Show that **Approve** is disabled. Tick *"I understand this will change producti
 
 Click **Approve & promote to production**.
 
-**Expected:** toast *Production updated*; the progress bar completes; History shows *Promotion approved* and *Promote to production · Succeeded*; **Managed VMs** lists `demo-web` in Production.
+**Expected:** toast *Production updated*; the progress bar completes; History shows *Promotion approved* and *Promote to production · Succeeded*; **Managed VMs** and the resource tree list `100 (demo-web)` under Production.
 
 Optional (30 s): switch to **Production**, select `demo-web` from Managed VMs, click **Recreate VM** → the approval panel asks for `RECREATE`, the plan is DESTRUCTIVE and the AI says **HIGH** risk. Click **Reject**.
 

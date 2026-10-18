@@ -2,7 +2,7 @@
 
 ## 1.1.0 – 2026-10-18
 
-- Console redesign: flat dark design tokens (contrast-checked), Inter + JetBrains Mono bundled offline, Lucide SVG icons instead of emoji.
+- Console redesign in the style of the Proxmox VE / Datacenter Manager dark theme: top bar with Tasks and user buttons, Server View resource tree (Datacenter › node › Test / Production › VMs, templates, storage), toolbar actions, light-blue panel titles, 13px Helvetica/Arial. Contrast-checked tokens, Lucide SVG icons instead of emoji, monospace bundled offline.
 - Workflow progress bar (Define → Production); the next step is the only primary button.
 - Toast notifications, confirmation dialog for destructive actions, status pills with icon + text, skeleton loading states.
 - Diagnosis shown inside the Validation card; tickable pre-flight checklist in the plan review.

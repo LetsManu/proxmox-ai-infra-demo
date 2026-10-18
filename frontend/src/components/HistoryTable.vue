@@ -90,16 +90,16 @@ const OS = { 'ubuntu-24-04': 'Ubuntu 24.04', 'debian-12': 'Debian 12' }
 .tabs-head { padding-top: 0; padding-bottom: 0; }
 .tabs { display: flex; gap: .25rem; align-self: stretch; }
 .tabs button {
-  font: inherit; font-size: .88rem; font-weight: 600; background: transparent; border: 0; color: var(--mut); cursor: pointer;
-  display: inline-flex; align-items: center; gap: .45rem; padding: 0 .75rem; min-height: 54px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  font: inherit; font-size: 15px; font-weight: 400; background: transparent; border: 0; color: var(--mut); cursor: pointer;
+  display: inline-flex; align-items: center; gap: .45rem; padding: 0 .75rem; min-height: 40px; border-bottom: 2px solid transparent;
 }
 .tabs button:hover { color: var(--fg); }
-.tabs button.on { color: var(--fg); border-bottom-color: var(--acc); }
+.tabs button.on { color: var(--title); border-bottom-color: var(--acc); }
 .count { background: var(--surface-3); color: var(--mut); border-radius: 99px; padding: 0 .45rem; font-size: .74rem; }
 .table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
-th { text-align: left; font-weight: 500; font-size: .78rem; color: var(--dim); padding: .65rem 1.1rem; border-bottom: 1px solid var(--line); white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
-td { padding: .7rem 1.1rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 700; font-size: 13px; color: var(--fg); padding: .45rem .9rem; border-bottom: 1px solid var(--line); border-top: 1px solid var(--line); white-space: nowrap; background: var(--surface-2); }
+td { padding: .45rem .9rem; border-bottom: 1px solid #404040; vertical-align: middle; }
 tbody tr:last-child td { border-bottom: 0; }
 .nowrap { white-space: nowrap; }
 .summary { color: var(--mut); max-width: 380px; }

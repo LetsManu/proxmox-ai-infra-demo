@@ -18,8 +18,8 @@ const ic = computed(() => props.icon || DEFAULT[props.tone])
 
 <style scoped>
 .pill {
-  display: inline-flex; align-items: center; gap: .35rem; padding: .18rem .6rem .18rem .45rem; border-radius: 99px;
-  font-size: .78rem; font-weight: 600; line-height: 1.4; white-space: nowrap; max-width: 100%;
+  display: inline-flex; align-items: center; gap: .35rem; padding: .18rem .6rem .18rem .45rem; border-radius: 3px;
+  font-size: 12px; font-weight: 600; line-height: 1.4; white-space: nowrap; max-width: 100%;
 }
 .pill > span { overflow: hidden; text-overflow: ellipsis; }
 .ok { background: var(--tone-ok); color: var(--ok); }

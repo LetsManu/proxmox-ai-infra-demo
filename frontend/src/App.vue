@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { Layers, Server, FlaskConical, Radio, Boxes, Bot } from 'lucide-vue-next'
+import { Layers, FlaskConical, Radio, Boxes, Bot, ListTodo, User, Menu, Play, ShieldCheck, Activity, FileCode, RotateCcw } from 'lucide-vue-next'
 import { api, pollJob } from './api.js'
 import VmCreateForm from './components/VmCreateForm.vue'
 import PlanPanel from './components/PlanPanel.vue'
@@ -10,7 +10,7 @@ import PromotionPanel from './components/PromotionPanel.vue'
 import JobLogPanel from './components/JobLogPanel.vue'
 import HistoryTable from './components/HistoryTable.vue'
 import WorkflowSteps from './components/WorkflowSteps.vue'
-import StatusPill from './components/ui/StatusPill.vue'
+import ResourceTree from './components/ResourceTree.vue'
 import Skeleton from './components/ui/Skeleton.vue'
 import ToastHost from './components/ui/ToastHost.vue'
 import ConfirmDialog from './components/ui/ConfirmDialog.vue'
@@ -51,6 +51,8 @@ const approvalSummaryLoading = ref(false)
 const troubleshootResult = ref(null)
 const troubleshootLoading = ref(false)
 const busy = ref('')
+const treeOpen = ref(false)
+const tasksEl = ref(null)
 
 const policy = computed(() => environments.value.find((e) => e.key === env.value))
 const spec = computed(() => ({ ...JSON.parse(JSON.stringify(form)), environment: env.value }))
@@ -340,17 +342,26 @@ function selectVm(vm) {
     ssh_public_key: vm.spec.ssh_public_key || '',
     cloud_init: vm.spec.cloud_init || { packages: [], commands: [] },
   })
+  treeOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-const initials = computed(() =>
-  (health.value?.settings.user || '')
-    .split(/[-_. ]/)
-    .map((p) => p[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase(),
+const selectedKey = computed(() => (currentVm.value ? `${currentVm.value.environment}/${currentVm.value.name}` : ''))
+const pageTitle = computed(() =>
+  currentVm.value
+    ? `Virtual Machine ${currentVm.value.vmid} (${currentVm.value.name}) on node '${currentVm.value.node}'`
+    : `New virtual machine (${env.value === 'prod' ? 'Production' : 'Test'})`,
 )
+const runningTasks = computed(() => (busy.value ? 1 : 0) + (awaiting.value ? 1 : 0))
+
+function selectEnv(key) {
+  env.value = key
+  treeOpen.value = false
+}
+
+function showTasks() {
+  tasksEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 let timer
 onMounted(() => {
@@ -362,172 +373,195 @@ onUnmounted(() => clearInterval(timer))
 
 <template>
   <a class="skip" href="#main">Skip to content</a>
-  <header class="header">
-    <div class="header-inner">
-      <div class="brand">
-        <span class="logo" aria-hidden="true"><Layers :size="18" /></span>
-        <div class="brand-text">
-          <span class="name">Proxmox <span class="hide-xs">Infra </span>Console</span>
-          <span class="tagline">Plan · Test · Validate · Approve</span>
-        </div>
-      </div>
-
-      <div class="env" role="radiogroup" aria-label="Environment">
-        <button
-          v-for="e in [{ key: 'test', label: 'Test' }, { key: 'prod', label: 'Production' }]"
-          :key="e.key"
-          type="button"
-          role="radio"
-          :aria-checked="env === e.key"
-          :class="['seg', { active: env === e.key, prod: e.key === 'prod' }]"
-          @click="env = e.key"
-        >
-          <span class="seg-dot" aria-hidden="true" />{{ e.label }}
-        </button>
-      </div>
-
-      <div class="status">
-        <template v-if="health">
-          <StatusPill v-if="isMock" tone="warn" :icon="FlaskConical" label="Mock mode" />
-          <StatusPill v-else tone="ok" :icon="Radio" label="Live" />
-        </template>
-        <Skeleton v-else w="88px" h="22px" radius="99px" />
-        <template v-if="pxStatus">
-          <StatusPill
-            :tone="pxStatus.connected ? 'muted' : 'err'"
-            :icon="Server"
-            :label="pxStatus.connected ? `PVE ${pxStatus.version?.version} · ${pxStatus.nodes?.[0]?.node}` : 'Proxmox unreachable'"
-            :title="pxStatus.error || ''"
-          />
-        </template>
-        <Skeleton v-else w="120px" h="22px" radius="99px" />
-        <StatusPill v-if="health" class="hide-md" tone="muted" :icon="Boxes" :label="health.settings.iac_binary === 'tofu' ? 'OpenTofu' : 'Terraform'" />
-        <StatusPill
-          v-if="health"
-          class="hide-md"
-          tone="muted"
-          :icon="Bot"
-          :label="health.settings.ai_model ? 'Claude' : 'Local rules'"
-          :title="health.settings.ai_model || 'No AI key configured: deterministic local analysis'"
-        />
-        <span v-if="initials" class="avatar" :title="`Signed in as ${health.settings.user}`">{{ initials }}</span>
-      </div>
+  <header class="topbar">
+    <button type="button" class="tree-toggle" :aria-expanded="treeOpen" aria-controls="resource-tree" aria-label="Resource tree" @click="treeOpen = !treeOpen">
+      <Menu :size="18" />
+    </button>
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><Layers :size="17" /></span>
+      <span class="name">Infra Console</span>
+      <span class="version">1.1.0</span>
+    </div>
+    <div class="bar-right">
+      <template v-if="health">
+        <span v-if="isMock" class="mode warn" title="LIVE_MODE=false: simulated Proxmox and OpenTofu"><FlaskConical :size="14" /><span class="t">Mock mode</span></span>
+        <span v-else class="mode ok"><Radio :size="14" /><span class="t">Live</span></span>
+        <span class="meta hide-md"><Boxes :size="14" />{{ health.settings.iac_binary === 'tofu' ? 'OpenTofu' : 'Terraform' }}</span>
+        <span class="meta hide-md" :title="health.settings.ai_model || 'No AI key configured: deterministic local analysis'"><Bot :size="14" />{{ health.settings.ai_model ? 'Claude' : 'Local rules' }}</span>
+      </template>
+      <Skeleton v-else w="160px" h="18px" />
+      <button type="button" class="tb-btn tasks" :aria-label="`Tasks: ${runningTasks} running`" @click="showTasks"><ListTodo :size="14" /><span class="t">Tasks: </span>{{ runningTasks }}</button>
+      <span v-if="health" class="tb-btn user" :title="`Signed in as ${health.settings.user}`"><User :size="14" />{{ health.settings.user }}@pve</span>
     </div>
   </header>
 
-  <WorkflowSteps :steps="steps" />
+  <div class="shell">
+    <aside id="resource-tree" class="sidebar" :class="{ open: treeOpen }">
+      <ResourceTree
+        :vms="vms"
+        :templates="templates"
+        :px-status="pxStatus"
+        :environments="environments"
+        :env="env"
+        :selected="selectedKey"
+        @select-env="selectEnv"
+        @select-vm="selectVm"
+      />
+    </aside>
+    <div v-if="treeOpen" class="scrim" @click="treeOpen = false" />
 
-  <main id="main" class="layout">
-    <div class="cols">
-      <div class="col-left">
-        <VmCreateForm
-          v-model="form"
-          :env="env"
-          :policy="policy"
-          :templates="templates"
-          :environments="environments"
-          @apply-spec="applyGeneratedSpec"
-        >
-          <div class="actions">
-            <button class="btn" :class="{ primary: nextAction === 'plan' }" :disabled="!can.plan" :aria-busy="busy === 'plan'" @click="generatePlan">
-              <span v-if="busy === 'plan'" class="spinner" />Generate Plan
-            </button>
-            <button class="btn" :class="{ primary: nextAction === 'deploy' }" :disabled="!can.deploy" :title="hints.deploy" :aria-busy="busy === 'deploy'" @click="deployTest">
-              <span v-if="busy === 'deploy'" class="spinner" />Deploy to Test
-            </button>
-            <button class="btn" :class="{ primary: nextAction === 'validate' }" :disabled="!can.validate" :title="hints.validate" :aria-busy="busy === 'validate'" @click="validate">
-              <span v-if="busy === 'validate'" class="spinner" />Validate
-            </button>
-            <button class="btn" :class="{ primary: nextAction === 'promote' }" :disabled="!can.promote" :title="hints.promote" :aria-busy="busy === 'promote'" @click="requestPromotion">
-              <span v-if="busy === 'promote'" class="spinner" />Request Production Promotion
-            </button>
-            <span class="spacer" />
-            <button class="btn danger" :disabled="!can.recreate" :title="hints.recreate" :aria-busy="busy === 'recreate'" @click="recreate">
-              <span v-if="busy === 'recreate'" class="spinner" />Recreate VM
-            </button>
-          </div>
-          <p v-if="env === 'test' && planJob && hints.deploy && ['plan', 'deploy'].includes(nextAction)" class="hint">{{ hints.deploy }}</p>
-          <p v-else-if="env === 'prod'" class="hint">Production VMs are created only by promoting a validated Test VM.</p>
-        </VmCreateForm>
+    <main id="main" class="content">
+      <div class="toolbar">
+        <h1 class="page-title">{{ pageTitle }}</h1>
+        <div class="env" role="radiogroup" aria-label="Environment">
+          <button
+            v-for="e in [{ key: 'test', label: 'Test' }, { key: 'prod', label: 'Production' }]"
+            :key="e.key"
+            type="button"
+            role="radio"
+            :aria-checked="env === e.key"
+            :class="['seg', { active: env === e.key, prod: e.key === 'prod' }]"
+            @click="env = e.key"
+          >
+            <span class="seg-dot" aria-hidden="true" />{{ e.label }}
+          </button>
+        </div>
+        <div class="actions">
+          <button class="btn" :class="{ primary: nextAction === 'plan' }" :disabled="!can.plan" :aria-busy="busy === 'plan'" @click="generatePlan">
+            <span v-if="busy === 'plan'" class="spinner" /><FileCode v-else :size="14" />Generate Plan
+          </button>
+          <button class="btn" :class="{ primary: nextAction === 'deploy' }" :disabled="!can.deploy" :title="hints.deploy" :aria-busy="busy === 'deploy'" @click="deployTest">
+            <span v-if="busy === 'deploy'" class="spinner" /><Play v-else :size="14" />Deploy to Test
+          </button>
+          <button class="btn" :class="{ primary: nextAction === 'validate' }" :disabled="!can.validate" :title="hints.validate" :aria-busy="busy === 'validate'" @click="validate">
+            <span v-if="busy === 'validate'" class="spinner" /><Activity v-else :size="14" />Validate
+          </button>
+          <button class="btn" :class="{ primary: nextAction === 'promote' }" :disabled="!can.promote" :title="hints.promote" :aria-busy="busy === 'promote'" @click="requestPromotion">
+            <span v-if="busy === 'promote'" class="spinner" /><ShieldCheck v-else :size="14" />Request Production Promotion
+          </button>
+          <button class="btn danger" :disabled="!can.recreate" :title="hints.recreate" :aria-busy="busy === 'recreate'" @click="recreate">
+            <span v-if="busy === 'recreate'" class="spinner" /><RotateCcw v-else :size="14" />Recreate VM
+          </button>
+        </div>
+      </div>
+      <p v-if="env === 'test' && planJob && hints.deploy && ['plan', 'deploy'].includes(nextAction)" class="hint">{{ hints.deploy }}</p>
+      <p v-else-if="env === 'prod'" class="hint">Production VMs are created only by promoting a validated Test VM.</p>
+
+      <WorkflowSteps :steps="steps" />
+
+      <div class="cols">
+        <div class="col-left">
+          <VmCreateForm
+            v-model="form"
+            :env="env"
+            :policy="policy"
+            :templates="templates"
+            :environments="environments"
+            @apply-spec="applyGeneratedSpec"
+          />
+        </div>
+
+        <div class="col-right">
+          <PlanPanel :job="planJob" :stale="!!planJob && planJob.action === 'plan' && !planMatchesForm" :busy="busy === 'plan'" />
+          <AiSummaryPanel :summary="planSummary" :loading="summaryLoading" />
+          <ValidationPanel
+            :job="validationJob"
+            :vm="currentVm"
+            :mock="isMock"
+            :options="validateOpts"
+            :running="busy === 'validate'"
+            :troubleshoot="troubleshootResult"
+            :troubleshoot-loading="troubleshootLoading"
+            @troubleshoot="troubleshoot"
+          />
+          <PromotionPanel
+            :job="approvalJob"
+            :summary="approvalSummary"
+            :summary-loading="approvalSummaryLoading"
+            :test-vm="testVm"
+            :busy="!!busy"
+            :approving="busy === 'approve'"
+            @decide="decide"
+          />
+        </div>
       </div>
 
-      <div class="col-right">
-        <PlanPanel :job="planJob" :stale="!!planJob && planJob.action === 'plan' && !planMatchesForm" :busy="busy === 'plan'" />
-        <AiSummaryPanel :summary="planSummary" :loading="summaryLoading" />
-        <ValidationPanel
-          :job="validationJob"
-          :vm="currentVm"
-          :mock="isMock"
-          :options="validateOpts"
-          :running="busy === 'validate'"
-          :troubleshoot="troubleshootResult"
-          :troubleshoot-loading="troubleshootLoading"
-          @troubleshoot="troubleshoot"
-        />
-        <PromotionPanel
-          :job="approvalJob"
-          :summary="approvalSummary"
-          :summary-loading="approvalSummaryLoading"
-          :test-vm="testVm"
-          :busy="!!busy"
-          :approving="busy === 'approve'"
-          @decide="decide"
-        />
+      <div ref="tasksEl" class="dock">
+        <JobLogPanel :job="activeJob" />
+        <HistoryTable :history="history" :vms="vms" :error="historyError" @select="selectVm" @retry="refresh" />
       </div>
-    </div>
 
-    <JobLogPanel :job="activeJob" />
-    <HistoryTable :history="history" :vms="vms" :error="historyError" @select="selectVm" @retry="refresh" />
-  </main>
-
-  <footer class="footer">
-    Proxmox credentials never reach the browser. Production changes always need a person to approve them.
-  </footer>
+      <footer class="footer">
+        Proxmox credentials never reach the browser. Production changes always need a person to approve them.
+      </footer>
+    </main>
+  </div>
 
   <ToastHost />
   <ConfirmDialog />
 </template>
 
 <style scoped>
-.header { position: sticky; top: 0; z-index: 50; background: rgba(16, 20, 24, .92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-.header-inner { max-width: 1440px; margin: 0 auto; height: var(--header-h); padding: 0 var(--pad-x); display: flex; align-items: center; gap: 1.25rem; }
-.brand { display: flex; align-items: center; gap: .7rem; min-width: 0; }
-.logo { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, #f07a22, #b85400); }
-.brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.name { font-weight: 650; font-size: .98rem; letter-spacing: -.01em; white-space: nowrap; }
-.tagline { font-size: .74rem; color: var(--dim); white-space: nowrap; }
+.topbar {
+  position: sticky; top: 0; z-index: 50; height: var(--header-h); background: var(--topbar); border-bottom: 1px solid #111;
+  display: flex; align-items: center; gap: .75rem; padding: 0 var(--pad-x);
+}
+.tree-toggle { display: none; background: transparent; border: 0; color: var(--fg); width: 36px; height: 36px; place-items: center; cursor: pointer; border-radius: var(--radius); }
+.tree-toggle:hover { background: rgba(255, 255, 255, .08); }
+.brand { display: flex; align-items: center; gap: .55rem; min-width: 0; }
+.logo { width: 28px; height: 28px; border-radius: 4px; display: grid; place-items: center; color: #fff; background: var(--brand); }
+.name { font-size: 16px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; }
+.version { color: var(--mut); font-size: 14px; }
+.bar-right { margin-left: auto; display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.mode, .meta { display: inline-flex; align-items: center; gap: .35rem; font-size: 13px; color: var(--mut); padding: 0 .4rem; white-space: nowrap; }
+.mode.warn { color: var(--warn); }
+.mode.ok { color: var(--ok); }
+.tb-btn {
+  display: inline-flex; align-items: center; gap: .4rem; height: 28px; padding: 0 .7rem; border-radius: var(--radius);
+  font: inherit; font-size: 13px; color: #fff; border: 0; white-space: nowrap;
+}
+.tasks { background: var(--acc-fill); cursor: pointer; }
+.tasks:hover { background: var(--acc-fill-hover); }
+.user { background: var(--user); }
 
-.env { display: inline-flex; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-left: .5rem; }
-.seg { font: inherit; font-size: .86rem; font-weight: 600; border: 0; background: transparent; color: var(--mut); padding: 0 .9rem; min-height: 32px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: .45rem; transition: background var(--t-fast), color var(--t-fast); }
-.seg:hover { color: var(--fg); }
-.seg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-.seg.active { background: var(--surface-3); color: var(--fg); }
-.seg.active .seg-dot { background: var(--info); }
-.seg.active.prod .seg-dot { background: var(--err); }
+.shell { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: calc(100vh - var(--header-h)); }
+.sidebar { background: var(--sidebar); border-right: 1px solid #1c1c1c; position: sticky; top: var(--header-h); height: calc(100vh - var(--header-h)); overflow-y: auto; }
+.scrim { display: none; }
+.content { min-width: 0; padding: 0 var(--pad-x) var(--pad-x); display: flex; flex-direction: column; gap: 10px; }
+
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem 1rem; padding: 10px 0 0; }
+.page-title { font-size: 15px; font-weight: 400; color: var(--fg); margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: .35rem; }
+.hint { font-size: 12px; color: var(--dim); margin-top: -4px; }
+
+.env { display: inline-flex; border: 1px solid #5c5c5c; border-radius: var(--radius); overflow: hidden; }
+.seg { font: inherit; font-size: 13px; border: 0; background: #444; color: var(--fg); padding: 0 .75rem; min-height: 28px; cursor: pointer; display: inline-flex; align-items: center; gap: .4rem; }
+.seg + .seg { border-left: 1px solid #5c5c5c; }
+.seg:hover { background: #505050; }
+.seg-dot { width: 7px; height: 7px; border-radius: 50%; background: #8a8a8a; }
+.seg.active { background: var(--sel); color: #fff; }
+.seg.active .seg-dot { background: #fff; }
 @media (pointer: coarse) { .seg { min-height: 40px; } }
 
-.status { margin-left: auto; display: flex; align-items: center; gap: .4rem; min-width: 0; }
-.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-3); color: var(--mut); font-size: .72rem; font-weight: 700; display: grid; place-items: center; margin-left: .35rem; flex: none; }
+.cols { display: grid; grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); gap: 10px; align-items: start; }
+.col-left { position: sticky; top: calc(var(--header-h) + 10px); }
+.col-right { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dock { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: calc(var(--header-h) + 10px); }
+.footer { text-align: center; color: var(--dim); font-size: 12px; padding: 1rem 0 1.5rem; }
 
-.layout { max-width: 1440px; margin: 0 auto; padding: 1.25rem var(--pad-x) 1rem; display: flex; flex-direction: column; gap: 1rem; }
-.cols { display: grid; grid-template-columns: minmax(360px, 440px) minmax(0, 1fr); gap: 1rem; align-items: start; }
-.col-left { position: sticky; top: calc(var(--header-h) + 1rem); }
-.col-right { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
-.spacer { flex: 1; }
-.hint { margin-top: .6rem; font-size: .8rem; color: var(--dim); }
-.footer { text-align: center; color: var(--dim); font-size: .78rem; padding: 1.5rem var(--pad-x) 2.5rem; }
-
-@media (max-width: 1240px) { .hide-md { display: none; } }
-@media (max-width: 1020px) {
-  .cols { grid-template-columns: 1fr; }
-  .col-left { position: static; }
+@media (max-width: 1280px) { .hide-md { display: none; } }
+@media (max-width: 1100px) { .cols { grid-template-columns: 1fr; } .col-left { position: static; } }
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .tree-toggle { display: grid; }
+  .sidebar { position: fixed; z-index: 60; left: 0; top: var(--header-h); width: min(300px, 85vw); transform: translateX(-100%); transition: transform var(--t-med) var(--ease); }
+  .sidebar.open { transform: none; box-shadow: var(--shadow-pop); }
+  .scrim { display: block; position: fixed; inset: var(--header-h) 0 0 0; z-index: 55; background: rgba(0, 0, 0, .45); }
+  .page-title { width: 100%; white-space: normal; }
 }
-@media (max-width: 720px) {
-  .header-inner { gap: .6rem; }
-  .tagline, .status :deep(.pill:not(:first-child)), .avatar { display: none; }
-  .env { margin-left: auto; }
-  .status { margin-left: 0; }
+@media (max-width: 560px) {
+  .version, .meta, .user, .bar-right .t { display: none; }
+  .mode { padding: 0; }
+  .actions .btn { flex: 1 1 calc(50% - .35rem); }
 }
-@media (max-width: 420px) { .name { font-size: .9rem; } .hide-xs { display: none; } .status { display: none; } .seg { padding: 0 .65rem; } }
 </style>

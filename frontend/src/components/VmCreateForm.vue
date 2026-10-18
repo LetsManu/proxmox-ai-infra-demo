@@ -180,7 +180,7 @@ function useDraft() {
       </details>
     </div>
 
-    <div class="card-foot">
+    <div v-if="$slots.default" class="card-foot">
       <slot />
     </div>
   </section>
