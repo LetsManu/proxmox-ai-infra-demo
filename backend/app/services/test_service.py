@@ -233,15 +233,16 @@ def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_fa
     log("$ " + " ".join(cmd))
     proc = subprocess.run(cmd, cwd=settings.ansible_dir, env=env_vars, capture_output=True, text=True, timeout=900,
                           stdin=subprocess.DEVNULL)
-    found: dict[str, tuple[bool, str]] = {}
-    for m in re.finditer(r"CHECK\|([0-9a-f]{8})\|(PASS|FAIL)\|([^\"\n]*)", proc.stdout):
-        found[m.group(1)] = (m.group(2) == "PASS", m.group(3).strip())
+    # results come back by position in `inside` (see tests.yml)
+    found: dict[int, tuple[bool, str]] = {}
+    for m in re.finditer(r"CHECK\|(\d+)\|(PASS|FAIL)\|([^\"\n]*)", proc.stdout):
+        found[int(m.group(1))] = (m.group(2) == "PASS", m.group(3).strip())
     if proc.returncode not in (0, 2) and not found:
         tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
         for line in tail:
             log(line)
-    return [{**c, "ok": found.get(c["id"], (False, ""))[0],
-             "detail": found.get(c["id"], (False, "no result (host unreachable?)"))[1]} for c in inside]
+    return [{**c, "ok": found.get(i, (False, ""))[0],
+             "detail": found.get(i, (False, "no result (host unreachable?)"))[1]} for i, c in enumerate(inside)]
 
 
 # ---- suites ------------------------------------------------------------------

@@ -69,3 +69,24 @@ def test_windows_is_not_ready_while_winrm_is_closed(monkeypatch):
 def test_windows_is_ready_once_winrm_answers(monkeypatch):
     check = _validate_windows(monkeypatch, winrm_open=True)["cloud_init_completed"]
     assert check["ok"]
+
+
+def test_inside_results_are_matched_by_position_not_id(monkeypatch, tmp_path):
+    # Ansible turns an all-digit id such as 00523341 into a number, so results come back by position
+    import subprocess
+
+    from pydantic import SecretStr
+
+    from app.config import get_settings
+    from app.services import test_service
+
+    checks = test_service._norm([{"type": "port_listening", "port": 80},
+                                 {"type": "package_installed", "package": "jq"}], "rules")
+    checks[0]["id"], checks[1]["id"] = "00523341", "0f98bb56"
+    out = "ok: [win1] => {\n    \"msg\": \"CHECK|1|FAIL|jq missing\"\n}\nok: [win1] => {\n    \"msg\": \"CHECK|0|PASS|tcp/80 listening\"\n}\n"
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=out, stderr=""))
+    settings = get_settings().model_copy(update={"workspace_dir": str(tmp_path), "windows_admin_password": SecretStr("x" * 16)})
+    res = test_service.run_inside(settings, name="win1", env="test", ip="192.0.2.15", os_family="windows",
+                                  checks=checks, job_id="t", log=lambda line: None, mock=False, fail=False)
+    assert [(r["id"], r["ok"], r["detail"]) for r in res] == [("00523341", True, "tcp/80 listening"),
+                                                            ("0f98bb56", False, "jq missing")]
