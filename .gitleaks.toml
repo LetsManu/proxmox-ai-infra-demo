@@ -1,0 +1,7 @@
+# Placeholder values in .env.example / docs are not secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "documentation placeholders"
+regexes = ['''00000000-0000-0000-0000-000000000000''', '''<secret>''', '''sk-test''']

@@ -1,0 +1,51 @@
+# --- Secrets & local config (NEVER commit) ---
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+!*.pub.example
+
+# --- Terraform / OpenTofu ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+generated.tfvars.json
+workspace/
+
+# --- Runtime data ---
+*.db
+*.db-wal
+*.db-shm
+data/
+*.log
+logs/
+
+# --- Python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# --- Node / Vite ---
+node_modules/
+dist/
+
+# --- OS / editors ---
+.DS_Store
+.idea/
+.vscode/

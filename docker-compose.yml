@@ -1,0 +1,60 @@
+name: proxmox-ai-infra
+
+# Shared hardening (same baseline as friendflix): non-root, read-only root FS,
+# no Linux capabilities, no privilege escalation, rotated logs.
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  backend:
+    <<: *hardening
+    tmpfs: [/tmp]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false # no .env = safe defaults = mock mode
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      WORKSPACE_DIR: /workspace
+      INFRA_DIR: /app/infra
+    volumes:
+      - app-data:/data          # SQLite deployment history
+      - tf-workspace:/workspace # separate TEST/PROD Terraform state + plans
+    ports:
+      # Bound to localhost only; the browser talks to the API through the frontend proxy.
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    <<: *hardening
+    tmpfs: [/tmp]
+    build:
+      context: ./frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_BIND:-0.0.0.0}:${FRONTEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  tf-workspace:
