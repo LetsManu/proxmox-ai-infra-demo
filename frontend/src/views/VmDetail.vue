@@ -76,7 +76,8 @@ const next = computed(() => {
   if (awaiting.value) return 'approve'
   if (isTest && vm.value.config_status === 'failed') return 'configure'
   if (isTest && vm.value.last_validation !== 'PASS') return 'validate'
-  if (isTest && !prodVm.value) return 'promote'
+  // promote when there is no production copy yet, or Test was redeployed (validated) since
+  if (isTest && (!prodVm.value || (vm.value.deployed_at || '') > (prodVm.value.deployed_at || ''))) return 'promote'
   if (!isTest && vm.value.last_validation !== 'PASS') return 'validate'
   return null
 })

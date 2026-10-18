@@ -23,7 +23,9 @@ SERVICE_SCHEMA = {
         "name": {"type": "string"},
         "image": {"type": "string"},
         "ports": {"type": "array", "items": {"type": "string"}},
-        "env": {"type": "object", "additionalProperties": {"type": "string"}},
+        # structured outputs need closed objects: settings come as [{name, value}] and are turned back into a dict
+        "env": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"},
+                "value": {"type": "string"}}, "required": ["name", "value"], "additionalProperties": False}},
         "volumes": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["name", "image", "ports", "env", "volumes"],
@@ -176,6 +178,8 @@ def finalize(settings: Settings, raw: dict) -> dict:
     comps = []
     for c in raw.get("components") or []:
         c = dict(c)
+        c["services"] = [{**svc, "env": {e["name"]: e["value"] for e in svc["env"] if isinstance(e, dict) and "name" in e}}
+                         if isinstance(svc.get("env"), list) else svc for svc in (c.get("services") or [])]
         c["name"] = re.sub(r"[^a-z0-9-]", "-", str(c.get("name", "app")).lower()).strip("-")[:12].strip("-") or "app"
         t = template_entry(c.get("template", ""))
         if c.get("kind") == "lxc" and t and t["os_family"] == "linux":

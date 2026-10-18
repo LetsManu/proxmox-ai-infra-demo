@@ -64,16 +64,21 @@ def check_approval(req: ApprovalFields, *, action: str, word: str) -> Job:
 
 def finish_approval_job(job_id: str, status: str, note: str, user: str) -> None:
     with session_scope() as db:
+        # Compare-and-set: of two concurrent approvals only one can move the job out of awaiting_approval.
+        claimed = db.query(Job).filter(Job.id == job_id, Job.status == JobStatus.AWAITING_APPROVAL) \
+            .update({Job.status: status}, synchronize_session=False)
+        if claimed != 1:
+            current = db.get(Job, job_id)
+            raise HTTPException(409, f"Job {job_id} was already decided ({current.status if current else 'missing'}).")
         job = db.get(Job, job_id)
-        if job.status != JobStatus.AWAITING_APPROVAL:  # guards against double approval
-            raise HTTPException(409, f"Job {job_id} was already decided ({job.status}).")
-        job.status = status
+        db.refresh(job)
         job.result = {**(job.result or {}), "decision": note, "decided_by": user,
                       "decided_at": datetime.now(timezone.utc).isoformat()}
         if status == JobStatus.FAILED:
             job.error = note
-        add_history(vm_name=job.vm_name, environment=job.environment, action=f"{job.action}-{note}",
-                    status=status, user=user, plan_summary=(job.result or {}).get("summary", ""), job_id=job_id)
+        entry = dict(vm_name=job.vm_name, environment=job.environment, action=f"{job.action}-{note}",
+                     status=status, user=user, plan_summary=(job.result or {}).get("summary", ""), job_id=job_id)
+    add_history(**entry)  # after commit: SQLite allows one writer at a time
 
 
 @router.post("/vms/promote/production", response_model=JobCreated, status_code=202)

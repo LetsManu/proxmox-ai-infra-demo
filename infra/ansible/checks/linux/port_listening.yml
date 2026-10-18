@@ -1,5 +1,6 @@
 - name: List listening TCP sockets
-  ansible.builtin.command: ["ss", "-Htln"]
+  ansible.builtin.command:
+    argv: ["ss", "-Htln"]
   register: r
   changed_when: false
   failed_when: false

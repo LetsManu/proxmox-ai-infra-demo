@@ -16,7 +16,9 @@ import time
 from typing import Callable
 
 from ..config import Settings
-from . import compose_service
+import ipaddress
+
+from . import ansible_vars, compose_service
 from .profile_service import get_profiles, roles_path
 from .proxmox_service import MockProxmox, get_proxmox
 
@@ -39,6 +41,14 @@ def forget_host(settings: Settings, env: str, name: str) -> None:
         pass
 
 
+def _is_ip(value) -> bool:
+    try:
+        ipaddress.ip_address(str(value))
+        return True
+    except ValueError:
+        return False
+
+
 def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = None, kind: str = "vm") -> str:
     px = get_proxmox(settings)
     mock = isinstance(px, MockProxmox)
@@ -48,6 +58,7 @@ def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = N
     while True:
         try:
             ips = px.guest_ips(vmid, kind)
+            ips = [a for a in ips if _is_ip(a)]
             if ips:
                 log(f"Guest agent reports {ips[0]}")
                 return ips[0]
@@ -63,6 +74,12 @@ def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os
     """Write a one-host inventory for this job; raises ConfigSkipped without credentials."""
     if not ip:
         raise ConfigSkipped("the VM has no IP address")
+    # The address comes from the guest (agent / container interfaces): accept a bare IP only,
+    # it ends up in the inventory, which Ansible would otherwise template.
+    try:
+        ip = str(ipaddress.ip_address(ip))
+    except ValueError as exc:
+        raise RuntimeError(f"Guest reported an invalid IP address {ip!r}") from exc
     if os_family == "windows" and not settings.windows_admin_password.get_secret_value():
         raise ConfigSkipped("WINDOWS_ADMIN_PASSWORD is not set; skipping configuration")
     key = settings.ansible_ssh_key_file
@@ -89,8 +106,12 @@ def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os
     return inv_path
 
 
+# Only what Ansible needs: the backend's own environment (API token, AI key, ...) is not passed on.
+_ENV_KEEP = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "TZ", "VIRTUAL_ENV", "PYTHONPATH")
+
+
 def ansible_env(settings: Settings) -> dict:
-    env_vars = dict(os.environ)
+    env_vars = {k: v for k, v in os.environ.items() if k in _ENV_KEEP or k.startswith("ANSIBLE_")}
     env_vars.update({
         "ANSIBLE_CONFIG": os.path.join(settings.ansible_dir, "ansible.cfg"),
         "ANSIBLE_ROLES_PATH": roles_path(settings),
@@ -114,13 +135,13 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
         return _mock_run(settings, name, os_family, profiles, log, packages, services)
 
     inv_path = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id, kind=kind)
-    vars_path = os.path.join(os.path.dirname(inv_path), "vars.json")
-    with open(vars_path, "w") as fh:
-        extra = {}
-        if services:
-            compose_yaml, secrets = compose_service.render(services)
-            extra = {"compose_yaml": compose_yaml, "stack_secrets": secrets, "stack_name": stack or name}
-        json.dump({"profiles": profiles, "packages": packages, **extra}, fh)
+    vars_path = os.path.join(os.path.dirname(inv_path), "vars.yml")
+    extra = {}
+    if services:
+        compose_yaml, secrets = compose_service.render(services)
+        extra = {"compose_yaml": compose_yaml, "stack_secrets": secrets, "stack_name": stack or name}
+    # never templated by Ansible (see ansible_vars)
+    ansible_vars.write(vars_path, {"profiles": profiles, "packages": packages, **extra})
     env_vars = ansible_env(settings)
     cmd = ["ansible-playbook", "-i", inv_path, "-e", f"@{vars_path}", os.path.join(settings.ansible_dir, "site.yml")]
     log("$ " + " ".join(cmd))

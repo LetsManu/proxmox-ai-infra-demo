@@ -1,5 +1,19 @@
+# One check: reset the result, run the type's tasks, print exactly one CHECK line.
+# A check that errors is reported as FAIL and never stops the remaining checks.
+- name: "Reset result: {{ check.title }}"
+  ansible.builtin.set_fact:
+    check_ok: false
+    check_detail: "no result"
+
 - name: "Check: {{ check.title }}"
-  ansible.builtin.include_tasks: "{{ family }}/{{ check.type }}.yml"
+  block:
+    - name: "Run: {{ check.title }}"
+      ansible.builtin.include_tasks: "{{ family }}/{{ check.type }}.yml"
+  rescue:
+    - name: "Check could not run: {{ check.title }}"
+      ansible.builtin.set_fact:
+        check_ok: false
+        check_detail: "check could not run: {{ ansible_failed_result.msg | default('error') | string | truncate(120) }}"
 
 - name: "Result: {{ check.title }}"
   ansible.builtin.debug:

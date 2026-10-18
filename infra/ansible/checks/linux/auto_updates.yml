@@ -1,5 +1,6 @@
 - name: Read APT periodic settings
-  ansible.builtin.command: ["apt-config", "dump", "APT::Periodic::Unattended-Upgrade"]
+  ansible.builtin.command:
+    argv: ["apt-config", "dump", "APT::Periodic::Unattended-Upgrade"]
   register: r
   changed_when: false
   failed_when: false

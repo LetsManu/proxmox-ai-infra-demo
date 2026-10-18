@@ -1,5 +1,6 @@
 - name: Effective sshd configuration
-  ansible.builtin.command: ["sshd", "-T"]
+  ansible.builtin.command:
+    argv: ["sshd", "-T"]
   register: r
   changed_when: false
   failed_when: false

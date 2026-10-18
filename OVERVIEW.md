@@ -214,6 +214,7 @@ Edit `.env` on the console host. `.env.example` explains every line. Set at leas
 | `ANSIBLE_SSH_KEY_FILE`, `WINDOWS_ADMIN_PASSWORD`, `ANTHROPIC_API_KEY` | **leave empty**: they come from `secrets/` |
 | `AI_PROVIDER` | `anthropic` to use Claude (key in step 8), `none` for local rules |
 | `PACKAGE_DENYLIST` | packages nobody may install, e.g. `telnetd,rsh-server` |
+| `FRONTEND_BIND` | `127.0.0.1` (default): only reachable on the console host, publish it through your SSO/reverse proxy (step 15). `0.0.0.0` only on a trusted network: the console has no login of its own |
 
 Leave `SNIPPETS_DATASTORE` empty if you don't give the console SSH access to the node (`PROXMOX_SSH_*`, see [docs/proxmox-setup.md](docs/proxmox-setup.md) section 6). Ansible installs the guest agent anyway; snippets only make the first boot report its IP sooner.
 
@@ -268,7 +269,7 @@ docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build
 docker compose ps                 # backend and frontend "healthy" after ~30 s
 ```
 
-Open `http://<console-host>:8080`. The backend API is bound to `127.0.0.1:8000` on the host; only the frontend is published.
+Open `http://localhost:8080` on the console host (or through your reverse proxy / an SSH tunnel: `ssh -L 8080:127.0.0.1:8080 <console-host>`). Both ports are bound to `127.0.0.1` by default; set `FRONTEND_BIND=0.0.0.0` only on a trusted network.
 
 **Check:**
 

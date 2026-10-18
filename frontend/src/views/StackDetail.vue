@@ -112,7 +112,7 @@ const next = computed(() => {
   if (!stack.value || busy.value) return null
   if (awaiting.value) return 'approve'
   if (isTest && stack.value.last_validation !== 'PASS') return 'validate'
-  if (isTest && !prod.value) return 'promote'
+  if (isTest && (!prod.value || (stack.value.deployed_at || '') > (prod.value.deployed_at || ''))) return 'promote'
   return null
 })
 const COLS = [

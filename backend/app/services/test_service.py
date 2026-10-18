@@ -14,7 +14,6 @@ A suite = built-in security baseline (always) + approved app checks.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import socket
@@ -56,6 +55,11 @@ SENSITIVE_PORTS = {21: "FTP", 23: "Telnet", 3306: "MySQL", 5432: "PostgreSQL", 6
                    9200: "Elasticsearch", 11211: "Memcached"}
 
 
+# Files tests may not read (file_contains runs with root rights on the machine).
+SENSITIVE_PATH_RE = re.compile(r"(?i)(/etc/(g?shadow|sudoers)|/root/|/\.ssh/|ssh_host_.*key|/opt/stacks/|/run/secrets|"
+                               r"\.env$|\\config\\SAM|\.pem$|\.key$)")
+
+
 def _port(v) -> bool:
     return isinstance(v, int) and 0 < v < 65536
 
@@ -85,14 +89,16 @@ def validate_checks(checks: list[dict], os_family: str) -> list[str]:
             rx = HTTP_PATH_RE if t in ("http", "http_local") else (WIN_PATH_RE if os_family == "windows" else LINUX_PATH_RE)
             if not rx.fullmatch(str(c["path"])):
                 errors.append(f"{label}: invalid path")
+        if "pattern" in c and not str(c["pattern"]).strip():
+            errors.append(f"{label}: pattern must not be empty")
         for f in ("contains", "pattern", "title"):
             if f in c and (not isinstance(c[f], str) or len(c[f]) > 120 or "\n" in c[f]):
                 errors.append(f"{label}: invalid {f}")
-        if "pattern" in c:
-            try:
-                re.compile(c["pattern"])
-            except re.error:
-                errors.append(f"{label}: pattern is not a valid regular expression")
+        # defence in depth: checks are passed to Ansible tagged !unsafe, and templates have no business here
+        if any(isinstance(v, str) and re.search(r"[{}]|\{%|%\}", v) for v in c.values()):
+            errors.append(f"{label}: '{{', '}}' are not allowed")
+        if t == "file_contains" and "path" in c and SENSITIVE_PATH_RE.search(str(c["path"])):
+            errors.append(f"{label}: this file may not be read by tests")
         if "status" in c and not (isinstance(c["status"], int) and 100 <= c["status"] < 600):
             errors.append(f"{label}: invalid status")
     return errors
@@ -118,7 +124,7 @@ def _default_title(c: dict) -> str:
         "port_listening": f"Something listens on port {c.get('port')}",
         "package_installed": f"Package {c.get('package')} is installed",
         "http_local": f"Local HTTP on port {c.get('port')} answers",
-        "file_contains": f"{c.get('path')} matches {c.get('pattern')}",
+        "file_contains": f"{c.get('path')} contains {c.get('pattern')}",
         "windows_feature": f"Windows feature {c.get('feature')} is installed",
         "sshd_setting": f"SSH: {c.get('key')} {c.get('value')}",
         "auto_updates": "Automatic security updates are enabled",
@@ -211,6 +217,7 @@ def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_fa
         return [{**c, "ok": not (fail and c["origin"] != "baseline"),
                  "detail": "passed (simulated)" if not (fail and c["origin"] != "baseline") else "failed (simulated)"}
                 for c in inside]
+    from . import ansible_vars
     from .config_service import ConfigSkipped, ansible_env, inventory_for
 
     try:
@@ -220,9 +227,8 @@ def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_fa
     except ConfigSkipped as exc:
         return [{**c, "ok": True, "skipped": True, "detail": f"not run: {exc}"} for c in inside]
     run_dir = os.path.dirname(inv_path)
-    vars_path = os.path.join(run_dir, "checks.json")
-    with open(vars_path, "w") as fh:
-        json.dump({"checks": inside}, fh)
+    vars_path = os.path.join(run_dir, "checks.yml")
+    ansible_vars.write(vars_path, {"checks": inside})  # never templated by Ansible
     cmd = ["ansible-playbook", "-i", inv_path, "-e", f"@{vars_path}", os.path.join(settings.ansible_dir, "tests.yml")]
     log("$ " + " ".join(cmd))
     proc = subprocess.run(cmd, cwd=settings.ansible_dir, env=env_vars, capture_output=True, text=True, timeout=900,

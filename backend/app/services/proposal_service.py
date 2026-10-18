@@ -32,7 +32,7 @@ ALLOWED_MODULES = {
     "linux": {
         "apt", "package", "service", "systemd", "systemd_service", "copy", "lineinfile", "blockinfile",
         "file", "user", "group", "get_url", "unarchive", "uri", "wait_for", "debug", "set_fact", "stat",
-        "assert", "apt_key", "apt_repository", "deb822_repository", "replace", "pip",
+        "assert", "apt_key", "apt_repository", "deb822_repository", "replace",
     },
     "windows": {
         "win_feature", "win_service", "win_copy", "win_file", "win_chocolatey", "win_get_url", "win_regedit",
@@ -99,6 +99,34 @@ def review_role(settings: Settings, *, name: str, os_family: str, tasks_yaml: st
     add("Only allowed modules (no shell/command/raw/script)", not bad,
         "not allowed: " + ", ".join(sorted(set(bad))) if bad else "")
     add("Downloads use HTTPS", not insecure, ", ".join(insecure))
+
+    # Lookups, filters and tests are evaluated on the console host, not on the VM: none allowed
+    # (lookup/query/q, pipe, env, file, password, url, ...). Plain variables like {{ item }} are fine.
+    text = tasks_yaml + "\n" + handlers_yaml
+    jinja = re.findall(r"\{\{.*?\}\}|\{%.*?%\}", text, re.S)
+    risky = [j for j in jinja if re.search(r"(?i)\b(lookup|query|q)\s*\(|\bpipe\b|\benv\b|hostvars|"
+                                            r"\bvars\b|_original_file|__|\bnamespace\b|\brange\b|\bcycler\b", j)]
+    # when/changed_when/failed_when/until are bare expressions (no braces): same rules, and no calls at all
+    for task in (parsed.get("tasks") or []) + (parsed.get("handlers") or []):
+        for kw in ("when", "changed_when", "failed_when", "until"):
+            for expr in (task.get(kw) if isinstance(task.get(kw), list) else [task.get(kw)]):
+                if isinstance(expr, str) and re.search(r"\w\s*\(|\bpipe\b|\benv\b|hostvars|__|\bvars\b", expr):
+                    risky.append(f"{kw}: {expr}")
+    if re.search(r"(?i)\b(lookup|query)\s*\(|\bq\s*\(", text):
+        risky.append("lookup()/query() call")
+    add("No lookups or code in templates", not risky, ", ".join(sorted(set(risky)))[:200])
+
+    # Modules that copy a *source* read it from the console unless remote_src is set
+    local_src = []
+    for task in (parsed.get("tasks") or []) + (parsed.get("handlers") or []):
+        mod = _module_of(task) or ""
+        short = mod.split(".")[-1]
+        body = task.get(mod) if isinstance(task.get(mod), dict) else {}
+        if short in ("copy", "win_copy", "unarchive") and body.get("src") and not body.get("remote_src"):
+            local_src.append(f"{short}: {body.get('src')}")
+        if any(k in task for k in ("delegate_to", "local_action", "run_once", "become_method", "become_exe")):
+            local_src.append(f"{short}: delegates or changes privilege escalation")
+    add("Nothing read from or run on the console", not local_src, "; ".join(local_src)[:200])
     secret_like = re.search(r"(?i)(password|secret|token)\s*[:=]\s*['\"]?[A-Za-z0-9/+]{8,}", tasks_yaml + handlers_yaml)
     add("No hard-coded secrets", not secret_like, "looks like a literal secret" if secret_like else "")
 

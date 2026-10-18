@@ -187,10 +187,12 @@ The same flow is available on the command line: `infra/scripts/promote.sh` refus
 - **Production needs a human.** Validation gate, plan review, checkbox, typed word, 60-minute plan expiry, double-approval protection. All enforced in the API, not only in the browser.
 - **Admin rights stay outside the console.** Identity, ACLs, storage and networks are created by the bootstrap stack from an admin's shell; the console image does not even contain it. The console's token can build templates and VMs in its pool, nothing more.
 - **Configuration from a catalog.** Software is installed only through reviewed Ansible roles and package managers; there is no free-form command execution, for users or the AI. AI-drafted roles and tests are used only after automated checks and a person's approval. SSH keys and the Windows password come from Docker secrets and are masked in logs.
-- **AI is advisory.** It has no route to deploy or approve. Its output is validated: unknown templates, oversized VMs, dangerous cloud-init commands are rejected; specs are forced to TEST; risk can only go up; "approved" wording is stripped.
+- **AI is advisory.** It has no route to deploy or approve. Its output is validated: unknown templates, oversized VMs and free-form commands are rejected; specs are forced to TEST; risk can only go up; "approved" wording is stripped.
+- **Nothing reaches Ansible as code.** Everything the console passes to a playbook (profiles, packages, compose files, test checks) is tagged `!unsafe`, so Ansible never evaluates templates in it; guest-reported IPs are validated; Ansible gets a minimal environment without the console's secrets. AI-drafted roles are rejected if they contain lookups, controller-side file sources, delegation or non-allowlisted modules.
 - **Containers are hardened**: non-root, read-only root filesystem, all capabilities dropped, `no-new-privileges`, rotated logs. The backend port binds to `127.0.0.1` only.
 - **Repository hygiene**: `.gitignore` covers `.env`, state, plans, secrets, logs; pre-commit hook (`git config core.hooksPath .githooks`) and CI run gitleaks.
-- **Not included**: authentication. `APP_USER` is a label for the audit trail. Put the console behind your SSO/reverse proxy (e.g. Authentik, oauth2-proxy) before giving anyone else access.
+- **Not included**: authentication. `APP_USER` is a label for the audit trail. The console therefore binds to `127.0.0.1` by default (`FRONTEND_BIND`); put it behind your SSO/reverse proxy (e.g. Authentik, oauth2-proxy) before giving anyone else access.
+- **Browser hardening**: strict Content-Security-Policy (no inline or third-party scripts, no framing), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
 
 See [SECURITY.md](SECURITY.md) for reporting issues.
 

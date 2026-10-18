@@ -8,6 +8,20 @@
   become: true
   gather_facts: false
   pre_tasks:
+    - name: Wait until SSH answers (checked from the console)
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: 22
+        timeout: 600
+      delegate_to: localhost
+      become: false
+    - name: Make sure Python is present (minimal LXC templates ship without it)
+      ansible.builtin.raw: test -x /usr/bin/python3 || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3)
+      register: python_bootstrap
+      retries: 10
+      delay: 6
+      until: python_bootstrap is succeeded
+      changed_when: false
     - name: Wait until the VM accepts SSH (cloud-init may still be running)
       ansible.builtin.wait_for_connection:
         timeout: 600

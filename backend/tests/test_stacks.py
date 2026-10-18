@@ -114,6 +114,28 @@ def test_full_stack_lifecycle(client):
     re_plan = wait(client, client.post("/api/stacks/plan", json={"stack": stack, "recreate": True}).json()["job_id"])
     assert re_plan["result"]["plan"]["counts"]["destroy"] == 2
     smaller = {**stack, "components": stack["components"][:1]}
-    shrink = wait(client, client.post("/api/stacks/plan", json={"stack": smaller}).json()["job_id"])
+    shrink = wait(client, client.post("/api/stacks/plan", json={"stack": smaller, "update": True}).json()["job_id"])
     assert shrink["result"]["removed"] == ["wordpress-monitor-test"]
     assert shrink["result"]["plan"]["counts"]["destroy"] == 1
+
+
+def test_software_only_change_is_stored_and_resets_validation(client):
+    stack = {"name": "swonly", "components": [{"name": "app", "kind": "vm", "template": "ubuntu-24-04", "cores": 1,
+             "memory_mb": 1024, "disk_gb": 16, "profiles": ["docker"], "packages": [],
+             "services": [{"name": "web", "image": "nginx:1.27", "ports": ["80:80"]}]}]}
+    plan = wait(client, client.post("/api/stacks/plan", json={"stack": stack}).json()["job_id"])
+    assert wait(client, client.post("/api/stacks/deploy", json={"plan_job_id": plan["id"]}).json()["job_id"])[
+        "status"] == "success"
+    assert wait(client, client.post("/api/stacks/validate", json={"name": "swonly"}).json()["job_id"])[
+        "status"] == "success"
+    stack["components"][0]["services"].append({"name": "adminer", "image": "adminer:5", "ports": ["8080:8080"]})
+    stack["components"][0]["packages"] = ["git"]
+    assert client.post("/api/stacks/plan", json={"stack": stack}).status_code == 409  # name clash refused
+    plan2 = wait(client, client.post("/api/stacks/plan", json={"stack": stack, "update": True}).json()["job_id"])
+    assert plan2["result"]["plan"]["changes"] == []
+    dep = wait(client, client.post("/api/stacks/deploy", json={"plan_job_id": plan2["id"]}).json()["job_id"])
+    assert dep["status"] == "success" and "(web, adminer)" in dep["logs"]
+    vm = next(v for v in client.get("/api/vms").json() if v["name"] == "swonly-app-test")
+    assert [s["name"] for s in vm["spec"]["services"]] == ["web", "adminer"] and vm["spec"]["packages"] == ["git"]
+    assert vm["last_validation"] is None
+    assert client.post("/api/stacks/promote", json={"name": "swonly"}).status_code == 409  # must validate again

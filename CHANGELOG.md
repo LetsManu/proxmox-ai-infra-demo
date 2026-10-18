@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.0.2 – 2026-10-18
+
+Results of an error and security review.
+
+**Security**
+- **Critical:** values passed to Ansible (Docker service settings, test checks, compose files, profile names) were evaluated as Jinja on the console host, so `{{ lookup('pipe', ...) }}` in a setting or an AI-drafted test could run commands there. All playbook data is now written as YAML tagged `!unsafe`. Template characters are also rejected in service settings and test fields.
+- The guest-reported IP is validated before it reaches the inventory.
+- Ansible runs with a minimal environment: no API token or AI key.
+- The review of AI-drafted roles now also rejects:
+  - lookups/`query()` anywhere, including bare `when`/`until` expressions;
+  - `hostvars`/`vars` access;
+  - `copy`/`unarchive` with a source on the console;
+  - `delegate_to`/`local_action`;
+  - `pip`.
+- Production approvals use a compare-and-set update, so two simultaneous approvals cannot both apply.
+- Cloud-init `commands` are no longer accepted (no free-form commands for people or the AI).
+- `file_contains` tests match literal text (no regular expressions) and may not read secrets (`/etc/shadow`, SSH keys, stack `.env`, …).
+- The console binds to `127.0.0.1` by default (`FRONTEND_BIND`); nginx sends a strict Content-Security-Policy and Permissions-Policy. The theme script moved out of `index.html`.
+
+**Fixes**
+- Inside tests never ran in live mode: `command:` with a bare list is rejected by ansible-core 2.21 (now `argv:`). Each check is now isolated: one error is reported as FAIL and the others still run.
+- Changing only software (services, packages, profiles) of a deployed machine or stack was not saved and could reach Production unvalidated. The new spec is now stored and the validation reset.
+- The Docker profile failed on Debian 12 (no Compose v2 package). It now installs Docker Engine + Compose from Docker's apt repository on Debian and Ubuntu; verified on Debian 12.
+- Minimal LXC templates without Python are bootstrapped before Ansible runs.
+- AI stack drafting always fell back to local rules: the structured-output schema used an open object for service settings.
+- *Create stack* with the name of an existing stack would have planned the old members for destruction; it is now refused.
+- Production can be updated from a Test machine or stack that was changed and validated after the last promotion.
+
 ## 2.0.1 – 2026-10-18
 
 - **OVERVIEW.md** now walks through every screen with 40 annotated screenshots (red frames mark what to click): empty environment → platform → Test VM → validation, diagnosis and review queue → Production → stack → end state.

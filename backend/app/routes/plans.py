@@ -134,6 +134,21 @@ def apply_plan(ctx: JobContext, settings: Settings, env: str, plan: dict, spec: 
                     px.register_vm(row.vmid, name, env, windows=os_family_for(row.spec.get("template", "")) == "windows",
                                    kind=row.spec.get("kind", "vm"))
             row.status = "running"
+        # Members without an infrastructure change can still have new software (profiles, packages,
+        # services): store the reviewed spec and treat it as a new deployment, so the old validation
+        # can't be used to promote software that was never tested.
+        changed = {ch["name"] for ch in plan["changes"]}
+        for name, m in members.items():
+            if name in changed:
+                continue
+            row = db.query(VirtualMachine).filter_by(name=name, environment=env).one_or_none()
+            new_spec = {**m["spec"], "_template_id": m["template_id"]}
+            if row is not None and row.spec != new_spec:
+                ctx.log(f"{name}: no infrastructure change; software settings updated")
+                row.spec = new_spec
+                row.deployed_at = now
+                row.last_validation = None
+                row.last_validation_at = None
     ctx.update_result(applied=True, applied_at=now.isoformat())
 
 

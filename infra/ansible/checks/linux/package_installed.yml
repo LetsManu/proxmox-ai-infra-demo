@@ -1,5 +1,6 @@
 - name: Query package
-  ansible.builtin.command: ["dpkg-query", "-W", "-f=${Status} ${Version}", "{{ check.package }}"]
+  ansible.builtin.command:
+    argv: ["dpkg-query", "-W", "-f=${Status} ${Version}", "{{ check.package }}"]
   register: r
   changed_when: false
   failed_when: false

@@ -1,5 +1,6 @@
 - name: Query service state
-  ansible.builtin.command: ["systemctl", "is-active", "{{ check.service }}"]
+  ansible.builtin.command:
+    argv: ["systemctl", "is-active", "{{ check.service }}"]
   register: r
   changed_when: false
   failed_when: false

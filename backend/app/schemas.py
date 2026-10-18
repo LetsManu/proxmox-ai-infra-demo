@@ -30,9 +30,9 @@ class CloudInit(BaseModel):
     @field_validator("commands")
     @classmethod
     def _commands(cls, v: list[str]) -> list[str]:
-        for c in v:
-            if len(c) > 300 or "\n" in c:
-                raise ValueError("Cloud-init commands must be single lines under 300 characters")
+        # No free-form commands, for people or the AI: software comes from profiles and packages.
+        if v:
+            raise ValueError("Cloud-init commands are not supported; use software profiles or packages")
         return v
 
 
@@ -80,8 +80,8 @@ class DockerService(BaseModel):
         for k, val in v.items():
             if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", k):
                 raise ValueError(f"Invalid environment variable name '{k}'")
-            if not isinstance(val, str) or len(val) > 300 or "\n" in val or "$" in val:
-                raise ValueError(f"{k}: values must be single-line text without '$'")
+            if not isinstance(val, str) or len(val) > 300 or "\n" in val or "$" in val or re.search(r"\{[{%#]", val):
+                raise ValueError(f"{k}: values must be single-line text without '$', '{{{{' or '{{%'")
             if val.startswith("secret:"):
                 if not re.fullmatch(r"secret:[a-z][a-z0-9_]{1,40}", val):
                     raise ValueError(f"{k}: secret references look like secret:db_password")
@@ -109,7 +109,7 @@ class VmSpec(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=10)
     kind: Literal["vm", "lxc"] = "vm"
     services: list[DockerService] = Field(default_factory=list, max_length=12)  # needs the docker profile
-    stack: str = Field(default="", max_length=64)
+    stack: str = Field(default="", pattern=r"^([a-z][a-z0-9-]{1,18}[a-z0-9])?$")
 
     @property
     def os_family(self) -> str:
@@ -278,6 +278,7 @@ class StackSpec(BaseModel):
 class StackPlanRequest(BaseModel):
     stack: StackSpec
     recreate: bool = False
+    update: bool = False  # explicit: change an already deployed stack (otherwise a name clash is refused)
 
 
 class StackDeployRequest(BaseModel):

@@ -90,8 +90,12 @@ def plan_stack(req: StackPlanRequest):
     stack = req.stack
     if stack.environment != "test":
         raise HTTPException(400, "Stacks are planned in TEST. Production uses the stack promotion workflow.")
-    if req.recreate and not get_stack(stack.name, "test"):
+    existing = get_stack(stack.name, "test")
+    if req.recreate and not existing:
         raise HTTPException(409, f"Stack '{stack.name}' is not deployed in TEST; nothing to recreate.")
+    if existing and not (req.recreate or req.update):
+        raise HTTPException(409, f"A stack named '{stack.name}' already exists in TEST. Choose another name, "
+                                 "or change the existing stack from its page.")
     job_id = create_job(action="stack-plan", environment="test", vm_name=stack.name, user=s.app_user,
                         params={"stack": stack.model_dump(), "recreate": req.recreate})
 

@@ -316,15 +316,15 @@ def _render_create(name: str, e: dict, env: str, s: Settings, sign: str = "+") -
     tags = sorted({"managed-by-iac", env, *e["tags"]})
     lines = [
         f'  {sign} resource "{RESOURCE}" "this" {{',
-        f'      + id          = (known after apply)',
+        '      + id          = (known after apply)',
         f'      + name        = "{name}"',
         f'      + node_name   = "{s.proxmox_node}"',
         f'      + vm_id       = {e["vm_id"]}',
         f'      + description = "{e["description"]}"',
         f'      + tags        = {_hcl_list(tags)}',
         f'      + on_boot     = {"true" if env == "prod" else "false"}',
-        f'      + started     = true',
-        f'      + ipv4_addresses = (known after apply)',
+        '      + started     = true',
+        '      + ipv4_addresses = (known after apply)',
         '',
         '      + agent {',
         '          + enabled = true',
