@@ -7,6 +7,7 @@ callers or written to logs.
 
 from __future__ import annotations
 
+import ipaddress
 import random
 import threading
 import time
@@ -15,6 +16,14 @@ from typing import Any
 import httpx
 
 from ..config import Settings, get_settings
+
+
+def _usable_ipv4(value: str) -> bool:
+    try:
+        ip = ipaddress.IPv4Address(value)
+    except ValueError:
+        return False
+    return not (ip.is_loopback or ip.is_link_local or ip.is_unspecified)
 
 
 class ProxmoxError(RuntimeError):
@@ -123,17 +132,21 @@ class ProxmoxClient:
                 "name": st.get("name"), "qmpstatus": st.get("qmpstatus")}
 
     def guest_ips(self, vmid: int, kind: str = "vm") -> list[str]:
-        """IPv4 addresses reported by the QEMU guest agent / the container (excluding loopback)."""
+        """Usable IPv4 addresses reported by the QEMU guest agent / the container.
+
+        Loopback and link-local (169.254.x.x) are skipped: Windows reports an APIPA
+        address until DHCP answers, and that address is unreachable from outside.
+        """
         if kind == "lxc":
-            return [i["inet"].split("/")[0] for i in self.get(f"/nodes/{self.node}/lxc/{vmid}/interfaces") or []
-                    if i.get("name") != "lo" and i.get("inet") and not i["inet"].startswith("127.")]
+            return [a for a in (i["inet"].split("/")[0] for i in self.get(f"/nodes/{self.node}/lxc/{vmid}/interfaces") or []
+                                if i.get("name") != "lo" and i.get("inet")) if _usable_ipv4(a)]
         data = self.get(f"/nodes/{self.node}/qemu/{vmid}/agent/network-get-interfaces")
         ips = []
         for iface in (data or {}).get("result", []):
             if iface.get("name") == "lo":
                 continue
             for addr in iface.get("ip-addresses", []):
-                if addr.get("ip-address-type") == "ipv4" and not addr["ip-address"].startswith("127."):
+                if addr.get("ip-address-type") == "ipv4" and _usable_ipv4(addr.get("ip-address", "")):
                     ips.append(addr["ip-address"])
         return ips
 
