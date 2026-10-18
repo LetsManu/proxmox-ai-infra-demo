@@ -7,7 +7,7 @@ This guide takes you through every step, in order, from an empty Proxmox VE node
 - a first VM deployed to Test, tested and promoted to Production,
 - a first stack (VM + container + Docker services).
 
-Each step ends with a **Check** so you know it worked before you continue. All names, hosts and addresses below are examples (`pve.example.internal`, `192.0.2.x`); use your own.
+Each step ends with a **Check** so you know it worked before you continue. Steps 11, 13 and 14 show every screen, from an empty environment to Test to Production. All names, hosts and addresses below are examples (`pve.example.internal`, `192.0.2.x`); use your own.
 
 > **Only want to try it?** Skip to [Appendix A: demo mode](#appendix-a-demo-mode-no-proxmox). It runs the whole workflow without Proxmox.
 
@@ -282,11 +282,35 @@ If the backend restarts in a loop, run `docker compose logs backend`. It usually
 
 ## Step 11: Prepare the platform (templates)
 
-1. Click **Platform** in the navigation. The table lists everything the console depends on and who creates it:
-   - networks, storage and pool: *Admin bootstrap*, should be **Present**;
-   - templates: *This console*, **Missing** for now.
-2. Click **Check what is missing**. The console runs an OpenTofu plan of `infra/platform`. Expect *6 to create*: two cloud images, two VM templates (9000, 9001) and two LXC templates. Read the risk badge and **Why?**.
-3. Click **Prepare platform**, read the dialog and confirm. Downloading the images takes a few minutes; the status card shows progress, and **Show details** opens the live log.
+> The pictures in steps 11, 13 and 14 were taken in demo mode, so the header says *Demo mode* and addresses come from documentation ranges. In live mode the screens are the same, with **Connected to Proxmox** in the header. A red frame with a number marks what to click next.
+
+**11.1 First start.** The dashboard tells you the platform is not ready yet: no templates exist, so no machines can be created. Click **Open Platform**.
+
+![First start: platform not ready](docs/images/overview/01-dashboard-first-start.jpg)
+
+**11.2 What the console needs.** The table lists every resource and who creates it:
+- networks, storage and pool come from the admin bootstrap and should be **Present**;
+- templates are created by this console and are **Missing**.
+
+Click **Check what is missing**.
+
+![Platform resources, templates missing](docs/images/overview/02-platform-missing.jpg)
+
+**11.3 Review the plan.** OpenTofu plans 6 resources: two cloud images, two VM templates and two LXC templates. Risk is *Low* (nothing is changed or destroyed); **Why?** explains it. Click **Prepare platform**.
+
+![Platform plan](docs/images/overview/03-platform-plan.jpg)
+
+**11.4 Confirm.** The dialog lists exactly what will happen.
+
+![Confirm the platform build](docs/images/overview/04-platform-confirm.jpg)
+
+**11.5 Building.** Downloading the images takes a few minutes in live mode. The status card shows progress, and **Show details** opens the live log. You can leave the page.
+
+![Platform building](docs/images/overview/05-platform-building.jpg)
+
+**11.6 Ready.** Every resource is **Present**.
+
+![Platform ready](docs/images/overview/06-platform-ready.jpg)
 
 **Check:** the banner says *Ready. All templates and storage exist.* In Proxmox you see templates `9000 (tmpl-ubuntu-24-04)` and `9001 (tmpl-debian-12)` in pool `infra-demo`, and two `.tar.zst` files under `infra-demo → CT Templates`.
 
@@ -300,48 +324,226 @@ You can do any of these now or later.
 
 ## Step 13: First VM: Test → validation → Production
 
-1. **Create VM** → describe the need, e.g. *"A small Ubuntu server for our intranet wiki with Nginx"* → **Draft with assistant** (or **Skip, fill in myself**).
-2. **Basics**: check name, OS and size.
-   - The name must end in `-test`, e.g. `wiki-test`. Production gets `wiki`, so it needs at least 3 characters before `-test`.
-   - Limits are shown next to each field.
-   - **Advanced options** has the description and an optional per-machine SSH key.
-3. **Software**: required items are ticked, optional ones are your choice.
-   - Each item is marked *Ready* (profile), *In repository* (package checked against the real repository), or *Waiting for review* (drafted role).
-   - Drafted roles can only be used after approval in the **Review queue**.
-4. **Review and deploy** → **Create plan** → read the sentence, the change list and the risk (**Why?**, **View full plan**) → **Deploy to Test**.
-   - Expect: the machine is created from the template, boots, gets an IP, then Ansible installs the base configuration and the software.
-   - The page then switches to the machine.
-5. **Validate**. Expect *Passed*:
-   - machine running, network address, first boot finished;
-   - **Security baseline**: SSH keys only, no root login, automatic updates, guest agent, no exposed database ports;
-   - **Application tests**: e.g. Nginx listening on port 80;
-   - software installed.
-6. Optional: **Draft tests with assistant** → **Review queue** → **Show details** → **Approve**. Validate again; it now runs the reviewed suite.
-7. **Request production approval**. A dialog lists exactly what will happen.
-   - Tick *I understand this will affect the production environment.* and type `PROMOTE`, then **Approve and deploy**.
-   - Or close the dialog: the request waits in the **Review queue** for someone else (valid for 60 minutes).
+The full life of one machine: describe it, deploy it to **Test**, prove it works, review the AI drafts, and promote it to **Production** with a person's approval.
+
+### 13.1 Describe it
+
+**Create VM** in the navigation. Describe the need in plain language and click **Draft with assistant**. **Skip, fill in myself** works too.
+
+![Describe the machine](docs/images/overview/07-vm-describe.jpg)
+
+### 13.2 Basics
+
+Check name, operating system and size.
+- The name must end in `-test`. Production gets the name without it (`wpsite-test` → `wpsite`), so use at least 3 characters before `-test`.
+- Limits are shown next to each field.
+- **Advanced options** holds the description and an optional per-machine SSH key.
+
+![Basics](docs/images/overview/08-vm-basics.jpg)
+
+### 13.3 Software
+
+The assistant listed what the request **needs**, split into *Required* and *Optional*:
+
+| Badge | Meaning |
+|---|---|
+| **Ready** | an existing software profile (Ansible role) |
+| **In repository** | a package that was looked up in the official repository |
+| **Waiting for review** | no profile covers it, so a role was drafted. It can be used only after approval in the **Review queue** |
+
+Optional items (backups, monitoring, fail2ban) are your choice. **Other software profiles** and **Extra packages** are below.
+
+![Software recommendations](docs/images/overview/09-vm-software.jpg)
+
+### 13.4 Review and create the plan
+
+A summary of everything you chose. Click **Create plan**; nothing changes on Proxmox yet.
+
+![Review](docs/images/overview/10-vm-review.jpg)
+
+### 13.5 Read the plan, then deploy
+
+The plan in one sentence, the list of changes and a risk badge:
+- **Why?** explains the rating and lists what to check;
+- **View full plan** shows the raw OpenTofu output in a side panel.
+
+Click **Deploy to Test**. It applies exactly this plan.
+
+![Plan and risk](docs/images/overview/11-vm-plan.jpg)
+
+### 13.6 Deploying
+
+The status card shows progress; **Show details** opens the live log.
+
+![Deploying](docs/images/overview/12-vm-deploying.jpg)
+
+The log shows the OpenTofu apply, then Ansible installing the base configuration and the software:
+
+![Live log](docs/images/overview/13-vm-deploy-log.jpg)
+
+### 13.7 The Test machine
+
+When the deployment finishes, the page switches to the machine. The lifecycle at the top shows where it stands. Click **Validate**.
+
+![Deployed to Test](docs/images/overview/14-test-deployed.jpg)
+
+### 13.8 Validation passed
+
+One line per check: machine running, network address, first boot finished, **security baseline**, **application tests** and software installed. **Show details** lists every single test and where it ran (on the machine or from the network).
+
+![Validation passed](docs/images/overview/15-test-validated.jpg)
+
+### 13.9 If something fails
+
+Failed checks turn red and the lifecycle step *Validated* turns red. Production stays locked. **Ask for a diagnosis** explains the likely cause.
+
+![Validation failed](docs/images/overview/16-test-failed.jpg)
+
+The diagnosis is advice only: what to check, a safe fix, and whether recreating the machine is safe or it may hold data. Fix the cause and **Validate** again, or **Recreate** a broken Test machine.
+
+![Diagnosis](docs/images/overview/17-test-diagnosis.jpg)
+
+### 13.10 Optional: AI-drafted tests
+
+**Draft tests with assistant** proposes application tests for this machine. They are used only after someone approves them.
+
+![Draft tests](docs/images/overview/18-test-draft-tests.jpg)
+
+### 13.11 Review queue
+
+Everything that waits for a person:
+- production requests,
+- drafted software roles,
+- drafted test suites.
+
+Each draft first passed automated safety checks. Click **Show details** to read one.
+
+![Review queue](docs/images/overview/19-review-queue.jpg)
+
+The side panel shows the automated checks first (allowed modules only, HTTPS downloads, no secrets, syntax check), then the role itself:
+
+![Draft details](docs/images/overview/20-review-role-details.jpg)
+
+**Approve** records your name. An approved role becomes a software profile; an approved test suite is used by every following validation.
+
+![Approve a draft](docs/images/overview/21-review-approve.jpg)
+
+### 13.12 Request production approval
+
+Back on the Test machine, **Validate** again (now with the approved tests). When it passes, the next step is **Request production approval**. The console creates the Production plan, and nothing changes yet.
+
+![Request production approval](docs/images/overview/22-prod-request.jpg)
+
+### 13.13 Approve: the production dialog
+
+The dialog lists exactly what will happen and how old the plan is (plans are valid for 60 minutes). **Approve and deploy** stays disabled until both are done:
+- the checkbox *I understand this will affect the production environment.* is ticked;
+- `PROMOTE` is typed exactly.
+
+![Production dialog](docs/images/overview/23-prod-dialog.jpg)
+
+![Production dialog filled in](docs/images/overview/24-prod-dialog-filled.jpg)
+
+If you close the dialog instead, the request waits in the **Review queue**, so a colleague can approve or reject it. The API checks every rule again; the browser cannot skip them.
+
+### 13.14 Deploying to Production
+
+A full clone on the Production network, then the same software installation.
+
+![Deploying to Production](docs/images/overview/25-prod-deploying.jpg)
+
+### 13.15 In Production
+
+All lifecycle steps are green. The resource tree shows `100 wpsite` under *Production*. Click **Open** to see the production machine.
+
+![Promoted](docs/images/overview/26-prod-promoted.jpg)
+
+### 13.16 Validate Production
+
+Production machines are validated the same way, on the production network.
+
+![Production machine](docs/images/overview/27-prod-machine.jpg)
+
+![Production validated](docs/images/overview/28-prod-validated.jpg)
 
 **Check:**
-- The machine page shows all steps green.
-- The resource tree lists `1xx wiki` under Production; Proxmox shows VM `1xx` on the Production vnet as a full clone.
+- Both machines show *Passed*.
+- Proxmox shows VM `9xx wpsite-test` (linked clone, `vtest`) and VM `1xx wpsite` (full clone, `vprod`).
 - **Activity** lists every step with your `APP_USER`.
 
 ## Step 14: First stack
 
-A stack is several machines handled as one: [docs/stacks.md](docs/stacks.md).
+A stack is several machines handled as one: one plan, one deployment, one validation verdict, one production approval. Details: [docs/stacks.md](docs/stacks.md).
 
-1. **Stacks → Create stack** → *"WordPress for the marketing team with monitoring"* → **Draft with assistant**.
-2. **Architecture**: expect a VM `app` with the Docker profile running `wordpress` and `db`, and an LXC container `monitor` running Prometheus and Grafana. Edit anything.
-   - Passwords stay `secret:<name>`: the machine generates them into `/opt/stacks/<stack>/.env`, and they never pass through the console.
-3. **Continue → Create plan** (one plan for all members) → **Deploy stack to Test**.
-4. On the stack page: **Validate stack**. Every member runs its checks: containers running, published ports open, baseline.
-5. **Request production approval** → same dialog, `PROMOTE` → the whole stack is created in Production.
+### 14.1 Create stack
+
+**Stacks** in the navigation → **Create stack**.
+
+![Stacks](docs/images/overview/29-stacks-empty.jpg)
+
+### 14.2 Describe the application
+
+![Describe the stack](docs/images/overview/30-stack-describe.jpg)
+
+### 14.3 Edit the architecture
+
+The assistant proposes two machines:
+- a **VM** `app` with the Docker profile, running `wordpress` and `db`;
+- an **LXC container** `monitor` running Prometheus and Grafana.
+
+You can change everything: type, OS, size, profiles, packages, services, ports and volumes. Passwords are `secret:<name>` references. The machine generates them into `/opt/stacks/<stack>/.env`, and they never pass through the console.
+
+![Architecture editor](docs/images/overview/31-stack-architecture.jpg)
+
+### 14.4 Review and plan
+
+One plan for all machines of the stack.
+
+![Stack review](docs/images/overview/32-stack-review.jpg)
+
+![Stack plan](docs/images/overview/33-stack-plan.jpg)
+
+### 14.5 Deployed to Test
+
+Every machine is created, then gets its software and Docker services. Click **Validate stack**.
+
+![Stack deployed](docs/images/overview/34-stack-deployed.jpg)
+
+### 14.6 Validated
+
+Each machine runs its checks: containers running, published ports open, security baseline. The stack passes only if every machine passes. Click **Request production approval**.
+
+![Stack validated](docs/images/overview/35-stack-validated.jpg)
+
+### 14.7 Approve the whole stack
+
+Same dialog, one decision for all machines.
+
+![Stack production dialog](docs/images/overview/36-stack-prod-dialog.jpg)
+
+### 14.8 Stack in Production
+
+![Stack promoted](docs/images/overview/37-stack-promoted.jpg)
 
 **Check:**
-- `http://<app-test-ip>/` shows the WordPress installer.
+- `http://<wordpress-app-test address>/` shows the WordPress installer.
 - The stack page lists both members with *Installed* and *Passed*.
 
 If the container fails with `only root can set 'features'`, the API token may not enable Docker nesting on your Proxmox version. Run the Docker host as a VM instead (change *Type* in the editor), or have an administrator enable nesting ([docs/stacks.md](docs/stacks.md)).
+
+### 14.9 The end state
+
+The dashboard per environment. **Test**:
+
+![Dashboard Test](docs/images/overview/38-dashboard-test.jpg)
+
+**Production**:
+
+![Dashboard Production](docs/images/overview/39-dashboard-production.jpg)
+
+**Activity**: every step, with who did it. Select a row to open its job log.
+
+![Activity](docs/images/overview/40-activity.jpg)
 
 ## Step 15: Before you hand it to others
 

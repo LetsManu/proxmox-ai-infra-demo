@@ -2,6 +2,9 @@
 
 ## 2.0.1 – 2026-10-18
 
+- **OVERVIEW.md** now walks through every screen with 40 annotated screenshots (red frames mark what to click): empty environment → platform → Test VM → validation, diagnosis and review queue → Production → stack → end state.
+- Fix: after approving a production request, the stale *Awaiting approval* card disappeared only after the next refresh.
+- Fix: production machines had no *Validate* action.
 - **OVERVIEW.md**: step-by-step setup from a bare Proxmox node to the first promoted VM and stack, with a check after every step, day-2 operations and troubleshooting.
 - Docs: fixed `docs/screenshots.md` (pointed to removed images); all docs use the current button names; architecture covers stacks, containers, proposals and tests.
 - Fix: secret files must be readable by the backend (uid 10001). The backend now names the unreadable file instead of crashing obscurely; the bootstrap script and `docker-compose.secrets.yml` show the `chown`.

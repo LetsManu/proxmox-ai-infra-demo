@@ -2,7 +2,7 @@
 // The backend enforces every rule (validated TEST source, 60-minute window, acknowledge flag,
 // typed word); the modal only collects the human decision.
 import { api } from './api.js'
-import { runJob } from './store.js'
+import { runJob, store } from './store.js'
 import { ask } from './components/ui/modal.js'
 import { toast } from './components/ui/toast.js'
 
@@ -54,6 +54,7 @@ export async function reviewAndApprove(job, { onUpdate } = {}) {
     confirmLabel: 'Approve and deploy',
   })
   if (!ok) return null
+  store.awaiting = (store.awaiting || []).filter((j) => j.id !== job.id) // decided: no longer waiting
   const applied = await runJob(k.label(job), () => k.call(job, { stage: 'approve', approval_job_id: job.id, acknowledge: true, confirmation: k.word }), { onUpdate })
   if (applied?.status === 'success') toast.success(`${job.vm_name}: ${job.result?.plan?.summary || 'applied'}`, { title: 'Production updated' })
   return applied
@@ -69,6 +70,7 @@ export async function rejectRequest(job) {
   if (!ok) return false
   try {
     await k.call(job, { stage: 'reject', approval_job_id: job.id })
+    store.awaiting = (store.awaiting || []).filter((j) => j.id !== job.id)
     toast.info('Nothing was changed in Production.', { title: 'Request rejected' })
     return true
   } catch (e) {

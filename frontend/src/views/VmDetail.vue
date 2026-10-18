@@ -77,6 +77,7 @@ const next = computed(() => {
   if (isTest && vm.value.config_status === 'failed') return 'configure'
   if (isTest && vm.value.last_validation !== 'PASS') return 'validate'
   if (isTest && !prodVm.value) return 'promote'
+  if (!isTest && vm.value.last_validation !== 'PASS') return 'validate'
   return null
 })
 
@@ -175,13 +176,13 @@ watch(() => vm.value?.last_validation_at, loadValidation)
     <PageHeader :title="name" :subtitle="subtitle" :env="env" :crumbs="[{ label: 'Dashboard', href: '#/dashboard' }]">
       <a v-if="vm.spec.stack" class="btn quiet" :href="`#/${links.stack(env, vm.spec.stack)}`">Part of stack {{ vm.spec.stack }}</a>
       <button v-if="isTest" type="button" class="btn quiet" :disabled="busy" @click="configure"><Wrench :size="16" />Install software again</button>
-      <button v-if="next && next !== 'validate' && isTest" type="button" class="btn" :disabled="busy" @click="validate"><Activity :size="16" />Validate</button>
+      <button v-if="next && next !== 'validate'" type="button" class="btn" :disabled="busy" @click="validate"><Activity :size="16" />Validate</button>
       <button type="button" class="btn danger" :disabled="busy || !!awaiting" @click="recreate"><RotateCcw :size="16" />Recreate</button>
       <button v-if="next === 'validate'" type="button" class="btn primary" @click="validate"><Activity :size="16" />Validate</button>
       <button v-else-if="next === 'configure'" type="button" class="btn primary" @click="configure"><Wrench :size="16" />Install software</button>
       <button v-else-if="next === 'promote'" type="button" class="btn primary" @click="requestPromotion"><ShieldCheck :size="16" />Request production approval</button>
       <button v-else-if="next === 'approve'" type="button" class="btn primary" @click="approve()"><ShieldCheck :size="16" />Review and approve</button>
-      <button v-else-if="isTest" type="button" class="btn" :disabled="busy" @click="validate"><Activity :size="16" />Validate</button>
+      <button v-else type="button" class="btn" :disabled="busy" @click="validate"><Activity :size="16" />Validate</button>
     </PageHeader>
 
     <Card v-if="!vm.spec.stack"><ProgressSteps :steps="steps" :label="`Progress of ${prodName}`" /></Card>
@@ -206,7 +207,7 @@ watch(() => vm.value?.last_validation_at, loadValidation)
         </template>
         <ValidationChecklist v-if="validation" :result="validation" />
         <p v-else class="muted">Validation checks that the machine runs, has a network address, finished its first boot, has its software and passes the security and application tests.</p>
-        <template #footer>
+        <template v-if="vm.last_validation === 'FAIL' || (isMock() && isTest)" #footer>
           <button v-if="vm.last_validation === 'FAIL'" type="button" class="btn" :disabled="diagnosing" :aria-busy="diagnosing" @click="diagnose">
             <span v-if="diagnosing" class="spinner" /><Stethoscope v-else :size="16" />Ask for a diagnosis
           </button>
