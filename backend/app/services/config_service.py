@@ -68,6 +68,9 @@ def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os
     key = settings.ansible_ssh_key_file
     if os_family == "linux" and not (key and os.path.exists(key) and os.path.getsize(key) > 0):
         raise ConfigSkipped("ANSIBLE_SSH_KEY_FILE is not set or missing; skipping configuration")
+    if os_family == "linux" and not os.access(key, os.R_OK):
+        raise ConfigSkipped(f"{key} is not readable by the backend (uid {os.getuid()}); "
+                            "run 'sudo chown 10001:10001 secrets/*' on the host")
 
     run_dir = os.path.join(settings.workspace_dir, "ansible", job_id)
     os.makedirs(run_dir, exist_ok=True)

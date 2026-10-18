@@ -17,7 +17,9 @@ Bootstrap (once) ─▶ Platform: cloud images + templates ─▶ Plan ─▶ AI
 - **AI assistance** (Claude): drafts machines and whole architectures, works out which software a request needs (required vs. optional, checked against the real package repositories), drafts Ansible roles and test suites for review, explains plans with a risk rating, diagnoses failures. Advisory only: drafts wait in a review queue.
 - **Automated tests**: security baseline plus application tests on every validation, inside the machine and from the network ([docs/testing.md](docs/testing.md))
 - **TEST** for disposable VMs, **PRODUCTION** behind validation plus explicit human approval
-- **Mock mode** runs the whole workflow with no Proxmox, VPN, DNS or internet
+- **Demo mode** (`LIVE_MODE=false`) runs the whole workflow with no Proxmox, VPN, DNS or internet
+
+> **Setting up a real environment?** Follow [OVERVIEW.md](OVERVIEW.md): every step from a bare Proxmox node to the first promoted VM and stack.
 
 ![Dashboard](docs/images/19-dashboard.png)
 
@@ -92,7 +94,7 @@ More detail: [docs/architecture.md](docs/architecture.md).
 - **Validation**: VM running, cloud-init finished, QEMU guest agent reports an IP, optional TCP health check, overall PASS/FAIL.
 - **Recreate**: destroy and clone again from the template (cloud-init reruns). In production this also requires typed approval (`RECREATE`).
 - **History**: every plan, deploy, validation and approval with user and plan summary.
-- **Platform**: shows every resource the console depends on (networks, storage, pool, templates) and who creates it; *Prepare Platform* plans and *Build templates* applies the platform stack.
+- **Platform**: shows every resource the console depends on (networks, storage, pool, templates) and who creates it; *Check what is missing* plans the platform stack, *Prepare platform* applies it (cloud images, VM templates, LXC templates).
 - **Software per project**: profiles are discovered from Ansible role folders (built-in plus a project `profiles/` folder, re-read live), plus free-form apt/Chocolatey packages per VM. Ansible installs them after deploy, recreate and promotion; *Configure* re-runs it; validation checks it. See [docs/configuration.md](docs/configuration.md).
 - **Windows Server 2022** alongside Ubuntu 24.04 and Debian 12 (Windows template provided once, see [docs/windows-template.md](docs/windows-template.md)).
 
@@ -114,7 +116,7 @@ open http://localhost:8080    # or xdg-open / just browse to it
 
 No `.env` at all also works: the backend falls back to safe defaults (mock mode).
 
-Then click through: **Draft spec → Use this spec → Generate Plan → Deploy to Test → Validate → Request Production Promotion → tick the checkbox, type `PROMOTE` → Approve**. The full presenter script is in [DEMO.md](DEMO.md).
+Then click through: **Platform → Check what is missing → Prepare platform**, then **Create VM → Draft with assistant → Continue → Continue → Create plan → Deploy to Test → Validate → Request production approval → tick the checkbox, type `PROMOTE` → Approve and deploy**. The full presenter script is in [DEMO.md](DEMO.md).
 
 ## Going live against Proxmox
 
@@ -126,8 +128,8 @@ Then click through: **Draft spec → Use this spec → Generate Plan → Deploy 
    ```
    Then put the printed values into `.env`. Details: [docs/proxmox-setup.md](docs/proxmox-setup.md), [docs/api-token-setup.md](docs/api-token-setup.md).
 2. **Secrets for configuration**: `secrets/ansible_ssh_key` (private key whose public half is `DEFAULT_SSH_PUBLIC_KEY`) and, for Windows, `secrets/windows_admin_password`. See [docs/configuration.md](docs/configuration.md).
-3. **Start** with the secrets override: `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build`. The header shows **Live** and `PVE 8.x · <node>`.
-4. **Prepare Platform** in the console: it plans the platform stack (official Ubuntu/Debian cloud images → templates); *Build templates* applies it. Needs PVE 8.4+ (content type `import`). On older versions use `infra/scripts/create-cloudinit-template.sh` ([docs/cloud-images.md](docs/cloud-images.md)).
+3. **Start** with the secrets override: `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build`. The header shows **Connected to Proxmox**.
+4. **Platform → Check what is missing** in the console plans the platform stack (official Ubuntu/Debian cloud images → templates, LXC templates); **Prepare platform** applies it. Needs PVE 8.4+ (content type `import`). On older versions use `infra/scripts/create-cloudinit-template.sh` ([docs/cloud-images.md](docs/cloud-images.md)).
 5. Optional: provide the Windows template once ([docs/windows-template.md](docs/windows-template.md)).
 
 ### Proxmox API token (manual alternative to the bootstrap)
@@ -150,7 +152,7 @@ On Proxmox VE 9, replace `VM.Monitor` with `VM.GuestAgent.Audit VM.GuestAgent.Fi
 
 ### Platform (once, and after template updates)
 
-The **Platform** panel lists every resource the console depends on and who creates it. Missing templates block *Generate Plan*. **Prepare Platform** plans the platform stack; **Build templates** applies the reviewed plan.
+The **Platform** page lists every resource the console depends on and who creates it. Missing templates block new machines. **Check what is missing** plans the platform stack; **Prepare platform** applies the reviewed plan.
 
 ### Test deployment
 
@@ -184,7 +186,7 @@ The same flow is available on the command line: `infra/scripts/promote.sh` refus
 - **Separate state** for TEST and PRODUCTION, one writer per state (job lock).
 - **Production needs a human.** Validation gate, plan review, checkbox, typed word, 60-minute plan expiry, double-approval protection. All enforced in the API, not only in the browser.
 - **Admin rights stay outside the console.** Identity, ACLs, storage and networks are created by the bootstrap stack from an admin's shell; the console image does not even contain it. The console's token can build templates and VMs in its pool, nothing more.
-- **Configuration from a catalog.** Software is installed only through reviewed Ansible roles; there is no free-form command execution, for users or the AI. SSH keys and the Windows password come from Docker secrets and are masked in logs.
+- **Configuration from a catalog.** Software is installed only through reviewed Ansible roles and package managers; there is no free-form command execution, for users or the AI. AI-drafted roles and tests are used only after automated checks and a person's approval. SSH keys and the Windows password come from Docker secrets and are masked in logs.
 - **AI is advisory.** It has no route to deploy or approve. Its output is validated: unknown templates, oversized VMs, dangerous cloud-init commands are rejected; specs are forced to TEST; risk can only go up; "approved" wording is stripped.
 - **Containers are hardened**: non-root, read-only root filesystem, all capabilities dropped, `no-new-privileges`, rotated logs. The backend port binds to `127.0.0.1` only.
 - **Repository hygiene**: `.gitignore` covers `.env`, state, plans, secrets, logs; pre-commit hook (`git config core.hooksPath .githooks`) and CI run gitleaks.
@@ -209,6 +211,9 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | `UBUNTU_2404_IMAGE_URL`, `DEBIAN_12_IMAGE_URL` | official URLs | Cloud images for template builds |
 | `IAC_BINARY` | `tofu` | `tofu` or `terraform` |
 | `TEMPLATE_WINDOWS_2022_ID` | `9002` | Windows template (provided once) |
+| `DEBIAN_12_CT_URL`, `UBUNTU_2404_CT_URL`, `CT_STORAGE` | official URLs, `IMAGE_STORAGE` | LXC templates for stack containers |
+| `PACKAGE_CHECK` | `live` | `live` / `offline` / `off`: package lookups against the repositories |
+| `APPROVED_PROFILES_DIR` | `WORKSPACE_DIR/profiles` | Where approved AI-drafted roles are stored |
 | `POOL_ID`, `IMAGE_STORAGE`, `SNIPPETS_DATASTORE` | –, `local`, – | From the bootstrap output |
 | `ANSIBLE_SSH_KEY_FILE`, `WINDOWS_ADMIN_PASSWORD` | – | Software configuration (prefer Docker secrets) |
 | `PROFILES_DIR`, `EXTRA_PROFILE_DIRS`, `PACKAGE_DENYLIST` | `./profiles`, `/profiles`, – | Project software profiles and package policy |
@@ -259,16 +264,16 @@ Enable the secret-scanning pre-commit hook once: `git config core.hooksPath .git
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Header shows `Proxmox unreachable` | Host/VPN/DNS, wrong port, TLS | `curl -k https://<host>:8006/api2/json/version`; for the demo set `LIVE_MODE=false` |
+| Platform page says *Proxmox is not reachable* | Host/VPN/DNS, wrong port, TLS | `curl -k https://<host>:8006/api2/json/version`; for the demo set `LIVE_MODE=false` |
 | `401` in job log | Wrong user/realm, token ID or secret | `PROXMOX_USER=automation@pve`, `PROXMOX_TOKEN_ID=infra-demo` (name only) |
 | `403 Permission denied` | Missing ACL, or privsep token without its own ACL | `pveum user permissions automation@pve`; add the ACL for the token too |
-| OS shows "not built yet" | Platform not prepared | **Prepare Platform** → **Build templates** |
+| OS shows "not available yet" | Platform not prepared | **Platform → Check what is missing → Prepare platform** |
 | Platform plan fails on `import` | PVE older than 8.4 or storage without content `import` | Use the bootstrap storage, or build templates with the script |
-| "Software configured: skipped" | No `ANSIBLE_SSH_KEY_FILE` / `WINDOWS_ADMIN_PASSWORD` | Add the Docker secrets, then **Configure** |
+| "Software installed: skipped" | No `ANSIBLE_SSH_KEY_FILE` / `WINDOWS_ADMIN_PASSWORD` | Add the Docker secrets, then **Install software again** on the machine page |
 | Ansible `UNREACHABLE` | VM not reachable from the console host (firewall/VLAN routing), WinRM listener missing | Check routing from the Docker host to the VM VLANs; see docs/windows-template.md |
 | Validation: no IP | `qemu-guest-agent` missing in the image, or no DHCP on the VLAN | Rebuild the template with `--install-agent`; check DHCP |
 | Validation: cloud-init not completed | No DNS/internet on the test VLAN, broken snippet | `cloud-init status --long` on the VM console |
-| `Saved plan is stale` | State changed between plan and apply | Generate a new plan |
+| `Saved plan is stale` | State changed between plan and apply | Create a new plan |
 | `VM ID … outside the allowed range` | Wrong environment/tfvars | Check `environments/*.tfvars` |
 | Assistant shows *Local rules* | No key, `AI_PROVIDER=none`, or provider unreachable | Expected offline; set `AI_PROVIDER=anthropic` + key |
 

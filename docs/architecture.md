@@ -12,13 +12,13 @@ flowchart TB
         proxy["/api reverse proxy"]
     end
     subgraph be["backend container (FastAPI, uid 10001, read-only)"]
-        routes["routes/<br/>vms · plans · validation · promotion · ai"]
+        routes["routes/<br/>vms · plans · validation · promotion · stacks · proposals · platform · ai"]
         runner["workers/job_runner<br/>thread pool + per-env lock"]
         svc_px["proxmox_service<br/>(live | mock)"]
         svc_tf["terraform_service<br/>(live | mock)"]
         svc_val["validation_service"]
         svc_ai["ai_service<br/>guardrails + local fallback"]
-        db[("SQLite (WAL)<br/>jobs · virtual_machines · history")]
+        db[("SQLite (WAL)<br/>jobs · virtual_machines · stacks · proposals · history")]
     end
     ws[("workspace volume<br/>test/ prod/ state/")]
     pve["Proxmox VE API"]
@@ -41,8 +41,8 @@ flowchart TB
 | Stack | Path | Run by | Credentials | Creates |
 |---|---|---|---|---|
 | Bootstrap | `infra/bootstrap` | an admin, once, `infra/scripts/bootstrap.sh` | admin (shell env only) | role, user, token, ACLs, pool, image/snippet storage, SDN zone + vnets |
-| Platform | `infra/platform` | the console (*Prepare Platform*) | least-privilege token | cloud-image downloads, Linux templates |
-| VMs | `infra` + `environments/*.tfvars` | the console (plan/deploy/promote/recreate) | least-privilege token | VMs (TEST and PROD state separate) |
+| Platform | `infra/platform` | the console (*Platform → Prepare platform*) | least-privilege token | cloud-image downloads, Linux VM templates, LXC templates |
+| Machines | `infra` + `environments/*.tfvars` | the console (plan/deploy/promote/recreate, single VMs and stacks) | least-privilege token | VMs (`var.vms`) and LXC containers (`var.containers`); TEST and PROD state separate |
 
 After a VM stack apply, `services/config_service.py` runs Ansible (`infra/ansible/site.yml`) against the new
 VM: SSH for Linux, WinRM for Windows, base role plus the VM's profiles.
@@ -53,7 +53,9 @@ VM: SSH for Linux, WinRM for Windows, base role plus the VM's profiles.
 |---|---|
 | `jobs` | Every long-running action: status (`queued`, `running`, `success`, `failed`, `awaiting_approval`), params, logs, result, error, timestamps |
 | `virtual_machines` | Desired state per (name, environment): spec, VM ID, IP, last validation. Rendered into OpenTofu `var.vms`. |
-| `history` | Audit trail: timestamp, VM, environment, action, status, user, plan summary |
+| `stacks` | Stacks per environment: spec (components, Docker services), member names, last validation |
+| `proposals` | AI drafts waiting for review: software roles and test suites, automated check results, decision and approver |
+| `history` | Audit trail: timestamp, resource, environment, action, status, user, plan summary |
 
 SQLite is enough for one backend replica (WAL mode + busy timeout). SQLAlchemy keeps the code portable: switching to PostgreSQL is a `DATABASE_URL` change.
 
@@ -92,7 +94,7 @@ sequenceDiagram
     participant API
     participant Tofu as OpenTofu (prod state)
     participant AI
-    Op->>UI: Request Production Promotion
+    Op->>UI: Request production approval
     UI->>API: POST /vms/promote/production {stage: request}
     API->>API: TEST validation == PASS and newer than deploy?
     API->>Tofu: plan -out (prod)

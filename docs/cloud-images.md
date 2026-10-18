@@ -17,8 +17,8 @@ URLs live in configuration (`UBUNTU_2404_IMAGE_URL`, `DEBIAN_12_IMAGE_URL`), nev
 
 `infra/platform` declares, per Linux template, a `proxmox_download_file` (the official image, content type
 `import`) and a `proxmox_virtual_environment_vm` with `template = true` whose disk is `import_from` that file,
-plus agent, serial console and a cloud-init drive. In the console: **Platform → Prepare Platform** (plan) →
-**Build templates** (apply). The console's token is enough (the bootstrap grants `Datastore.AllocateTemplate`
+plus agent, serial console and a cloud-init drive. In the console: **Platform → Check what is missing** (plan) →
+**Prepare platform** (apply). The console's token is enough (the bootstrap grants `Datastore.AllocateTemplate`
 on the image storage). Requires PVE 8.4+.
 
 Cloud images lack the QEMU guest agent. With `SNIPPETS_DATASTORE` set (and node SSH for the provider), every
@@ -84,7 +84,7 @@ qm guest exec 950 -- cloud-init status --wait
 qm stop 950 && qm destroy 950 --purge
 ```
 
-Or in the console: plan + deploy a TEST VM, then **Validate**.
+Or in the console: **Create VM**, deploy to Test, then **Validate**.
 
 ## Update or recreate a template
 

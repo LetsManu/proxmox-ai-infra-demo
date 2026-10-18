@@ -44,6 +44,8 @@ chmod 600 "$ROOT/secrets/proxmox_token_secret" "$STACK/terraform.tfstate"
 
 echo
 echo "Token secret written to secrets/proxmox_token_secret (use docker-compose.secrets.yml)."
+echo "The backend container runs as uid 10001 and must be able to read it:"
+echo "  sudo chown 10001:10001 secrets/proxmox_token_secret"
 echo "The bootstrap state ($STACK/terraform.tfstate) contains the secret too: keep it private, never commit it."
 echo
 echo "Set these in .env:"

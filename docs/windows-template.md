@@ -51,7 +51,7 @@ Expected result: a Proxmox template with VMID `TEMPLATE_WINDOWS_2022_ID` (defaul
    ```
 6. Back on the node: `qm set 9002 --delete ide2,ide0 && qm set 9002 --ide2 local-lvm:cloudinit && qm template 9002`.
 
-The **Platform** panel then shows `9002 (Windows Server 2022)` as present.
+The **Platform** page then shows `9002 (Windows Server 2022)` as present.
 
 ## Console configuration
 

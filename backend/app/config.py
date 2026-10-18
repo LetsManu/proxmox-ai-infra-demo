@@ -195,8 +195,12 @@ def _secret_file_overrides() -> dict:
     for var in SECRET_FILE_VARS:
         path = os.environ.get(f"{var}_FILE")
         if path:
-            with open(path, encoding="utf-8") as fh:
-                overrides[var.lower()] = fh.read().strip()
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    overrides[var.lower()] = fh.read().strip()
+            except PermissionError as exc:
+                raise RuntimeError(f"Cannot read {path} ({var}_FILE). The backend runs as uid 10001: on the host run "
+                                   "'sudo chown 10001:10001 secrets/* && sudo chmod 600 secrets/*'.") from exc
     return overrides
 
 

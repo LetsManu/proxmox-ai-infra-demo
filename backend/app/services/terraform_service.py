@@ -105,7 +105,7 @@ def ct_entry(settings: Settings, spec: dict, vmid: int) -> dict:
         "cores": spec["cores"],
         "memory_mb": spec["memory_mb"],
         "disk_gb": spec["disk_gb"],
-        "nesting": True,
+        "nesting": "docker" in (spec.get("profiles") or []),  # only Docker hosts need nested containers
         "description": spec.get("description") or "",
         "ssh_public_key": spec.get("ssh_public_key") or "",
         "tags": spec.get("tags") or [],

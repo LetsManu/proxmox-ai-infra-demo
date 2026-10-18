@@ -1,16 +1,14 @@
 # Screenshots
 
-Captured from mock mode (`LIVE_MODE=false`) with a headless browser walking through the full workflow. All IPs are RFC 5737 documentation addresses.
+Captured in mock mode (`LIVE_MODE=false`) by a headless browser walking through [DEMO.md](../DEMO.md). All IPs are RFC 5737 documentation addresses.
 
 | | |
 |---|---|
-| ![Platform missing](images/00-platform-missing.png) **0. Platform** – the console notices missing templates | ![Platform plan](images/00b-platform-plan.png) **0b. Prepare Platform** – cloud images + templates as a plan |
-| ![Software](images/02b-software.png) **2b. Software** – discovered profiles (built-in + *Project*), extra packages as chips | |
-| ![Configured](images/03b-configured.png) **3b. Deploy + Ansible** – software installed after deploy | ![Windows](images/09-windows-form.png) **9. Windows** – IIS and admin tools profiles |
-| ![Dashboard](images/01-dashboard.png) **1. Console** – Proxmox-style resource tree, toolbar, progress bar, VM form | ![Draft](images/02-ai-spec.png) **2. Draft from a description** – natural language to a validated draft |
-| ![Plan](images/03-plan.png) **3. Plan + review** – counts, changes, low risk, pre-flight checklist | ![Troubleshoot](images/04-troubleshoot.png) **4. Failed validation** – diagnosis suggests a recreate |
-| ![Confirm](images/04b-confirm.png) **4b. Confirmation** – destructive actions ask first | |
-| ![Validation](images/05-validation-pass.png) **5. Validation passed** – running, cloud-init, guest-agent IP, port 22 | ![Promotion](images/06-promotion.png) **6. Production approval** – gates, plan, risk, acknowledgement + typed PROMOTE |
-| ![History](images/07-history.png) **7. History / managed VMs** | ![Mobile](images/08-mobile.png) **8. Mobile layout** |
-
-To regenerate: start the stack in mock mode, reset data (`docker compose down -v && docker compose up -d`) and capture the same steps as in [DEMO.md](../DEMO.md).
+| ![Dashboard](images/19-dashboard.png) **Dashboard** – status cards, recent activity, one primary action | ![Dark](images/20-dashboard-dark.png) **Dark theme** – same layout, tonal surfaces |
+| ![First start](images/01-dashboard-empty.png) **First start** – platform banner, empty states | ![Platform](images/02-platform-plan.png) **Platform** – what the console needs, who creates it, plan before building |
+| ![Software](images/05-wizard-software.png) **Create VM · Software** – required/optional needs, repository-checked packages, role draft waiting for review | ![Plan](images/06-wizard-plan.png) **Create VM · Review and deploy** – plan as a sentence, risk badge, *Why?* |
+| ![Full plan](images/07-drawer-plan.png) **Side panel** – full OpenTofu plan, highlighted and copyable | ![Failed](images/09-vm-failed.png) **Validation failed** – compact checklist, lifecycle step in red |
+| ![Diagnosis](images/10-diagnosis.png) **Diagnosis** – advisory, in a side panel | ![Passed](images/11-vm-passed.png) **Validation passed** – security baseline and application tests |
+| ![Review queue](images/12-review-queue.png) **Review queue** – production requests and AI drafts | ![Draft](images/13-proposal-drawer.png) **Draft details** – automated safety checks, then the artefact |
+| ![Production](images/14-prod-modal.png) **Production approval** – what will happen, acknowledgement, typed `PROMOTE` | ![Stack editor](images/16-stack-editor.png) **Stack architecture** – VM + LXC, Docker services, `secret:` references |
+| ![Stack](images/18-stack-detail.png) **Stack page** – members, per-machine validation | ![Mobile](images/22-mobile-dashboard.png) **375 px** – navigation as a slide-in panel, tables as cards |

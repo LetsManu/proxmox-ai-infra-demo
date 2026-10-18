@@ -2,7 +2,7 @@
 
 After a VM is created, the console installs software and configuration with **Ansible**
 (`infra/ansible`). It runs automatically after *Deploy to Test*, *Recreate* and an approved *Promotion*,
-and can be re-run with **Configure** (idempotent: unchanged things stay unchanged).
+and can be re-run with **Install software again** on the machine page (idempotent: unchanged things stay unchanged).
 
 ## Software is per project, not a fixed list
 
@@ -11,11 +11,11 @@ Three ways to get software onto a VM, from most to least reusable:
 1. **Profiles** – Ansible roles that carry a `profile.yml`. The backend discovers them on every request from
    the built-in `infra/ansible/roles` and from every folder in `EXTRA_PROFILE_DIRS` (by default the repository's
    `profiles/` folder, mounted read-only at `/profiles`; point `PROFILES_DIR` at a project repository to use its
-   roles). Add a folder → click **Refresh** in the Software section → it is a checkbox. No code change, no rebuild.
+   roles). Add a folder → click **Refresh catalog** in the Software step → it is a checkbox. No code change, no rebuild.
 2. **Extra packages** – any package name, typed per VM: apt names for Linux (`redis-server`, `git`,
    `nginx-extras=1.24.0-2`), Chocolatey IDs for Windows (`googlechrome`, `vscode`). Installed by the generic roles
    `packages_linux` / `packages_windows` through the package manager only.
-3. **The AI draft** fills both from a description, using the live catalog.
+3. **The assistant** works out what a description needs (required and optional), matches each need to a profile or a repository-checked package, and drafts a new role for the rest. Drafted roles wait in the **Review queue**; once approved they are stored in `APPROVED_PROFILES_DIR` and appear as profiles.
 
 What is *not* possible, on purpose: arbitrary shell commands. Package names are syntax-checked (no spaces,
 pipes, URLs), installed only via apt/Chocolatey, and `PACKAGE_DENYLIST` blocks names nobody may install.
@@ -68,14 +68,19 @@ The inventory holds only the VM's IP (from the QEMU guest agent), its group and 
 Passwords are read by Ansible from the environment, never written to disk, and masked in job logs.
 
 If credentials are missing, configuration is **skipped** (logged) instead of failing; validation then reports
-"Software configured: skipped" and fails if profiles were requested.
+"Software installed: skipped" and fails if profiles were requested.
 
 ## Validation
 
-Validation adds a **Software configured** check (last Ansible run succeeded) and uses the profile's port for the
-service check by default (80 for `nginx`/`iis`).
+Validation adds a **Software installed** check (last Ansible run succeeded) and runs the security baseline and
+application tests, see [testing.md](testing.md).
 
-## Mock mode
+## LXC containers and Docker services
+
+Containers (stacks) are configured the same way, over SSH as `root` with the same key; Docker services run on a
+machine with the `docker` profile through the `docker_services` role. See [stacks.md](stacks.md).
+
+## Demo mode (mock)
 
 In mock mode the Ansible run is simulated with realistic `TASK` / `PLAY RECAP` output, so the flow can be shown
 without VMs.

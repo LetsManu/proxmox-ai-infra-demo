@@ -68,7 +68,7 @@ Datastore.AllocateSpace Datastore.Audit SDN.Use Sys.Audit"
 
 Deliberately **not** granted: `Sys.Modify`, `Permissions.Modify`, `User.Modify`, `Sys.Console`, `VM.Console`, `Realm.*`.
 
-The platform stack (*Prepare Platform*) downloads cloud images, so the role also needs `Datastore.AllocateTemplate` (on the image storage) and `Pool.Audit`/`SDN.Audit` for the status view; the bootstrap role includes them. Add them to the manual role above if you use the platform stack.
+The platform stack (*Platform → Prepare platform*) downloads cloud images, so the role also needs `Datastore.AllocateTemplate` (on the image storage) and `Pool.Audit`/`SDN.Audit` for the status view; the bootstrap role includes them. Add them to the manual role above if you use the platform stack.
 
 ## 3. Token (privilege separated)
 

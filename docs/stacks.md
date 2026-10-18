@@ -28,8 +28,11 @@ bootstrap enables content `vztmpl` there). Differences to VMs:
 - No cloud-init and no guest agent: the IP comes from the container's interfaces API.
 - Ansible connects as `root` with the key from `ANSIBLE_SSH_KEY_FILE`; the
   baseline allows root login **only with a key** (`PermitRootLogin prohibit-password`).
-- `nesting` is enabled so containers can run Docker. Docker inside unprivileged
-  LXC works on most storage setups; for heavy or stateful Docker workloads prefer a VM.
+- Containers with the `docker` profile get the `nesting` feature so they can run
+  Docker; other containers don't. If Proxmox refuses it for the API token
+  (`only root can set 'features'`), let an administrator enable nesting on the
+  container, or run that component as a VM. Docker inside unprivileged LXC works
+  on most storage setups; for heavy or stateful Docker workloads prefer a VM.
 
 ## Docker services
 

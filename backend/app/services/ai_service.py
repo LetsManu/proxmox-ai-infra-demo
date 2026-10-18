@@ -378,7 +378,7 @@ def generate_vm_spec(settings: Settings, prompt: str) -> dict:
     except ValidationError as exc:
         out.setdefault("warnings", []).append(f"Software plan not applied: {exc.errors()[0]['msg']}")
     out["software"] = analysis
-    out["note"] = "Generated spec is a draft. Review it, then Generate Plan. Nothing is deployed automatically."
+    out["note"] = "Generated spec is a draft. Review it, then create a plan. Nothing is deployed automatically."
     return out
 
 
