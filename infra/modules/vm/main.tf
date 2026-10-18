@@ -78,6 +78,8 @@ resource "proxmox_virtual_environment_vm" "this" {
 
   initialization {
     datastore_id = var.datastore_id
+    # cloudbase-init reads the OpenStack config drive; Linux keeps the Proxmox default (nocloud)
+    type = local.windows ? "configdrive2" : null
 
     ip_config {
       ipv4 {

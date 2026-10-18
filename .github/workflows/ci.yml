@@ -44,6 +44,9 @@ jobs:
           for d in . platform bootstrap; do
             (cd "$d" && tofu init -backend=false -input=false && tofu validate)
           done
+      - name: VM module plan tests (mocked provider, no Proxmox API)
+        working-directory: infra/modules/vm
+        run: tofu init -input=false && tofu test
       - name: Shell scripts parse
         run: for f in scripts/*.sh; do bash -n "$f"; done
 
