@@ -105,7 +105,7 @@ open http://localhost:8080    # or xdg-open / just browse to it
 
 No `.env` at all also works: the backend falls back to safe defaults (mock mode).
 
-Then click through: **Generate VM spec → Use this spec → Generate Plan → Deploy to Test → Validate → Request Production Promotion → tick the checkbox, type `PROMOTE` → Approve**. The full presenter script is in [DEMO.md](DEMO.md).
+Then click through: **Draft spec → Use this spec → Generate Plan → Deploy to Test → Validate → Request Production Promotion → tick the checkbox, type `PROMOTE` → Approve**. The full presenter script is in [DEMO.md](DEMO.md).
 
 ## Going live against Proxmox
 
@@ -119,7 +119,7 @@ Then click through: **Generate VM spec → Use this spec → Generate Plan → D
    ```
    (Copy `.env` only if it holds no secrets yet, or pass `--image-url` instead.)
 4. **Configure `.env`**: `LIVE_MODE=true`, `PROXMOX_*`, storage/bridge/VLAN, template IDs, `DEFAULT_SSH_PUBLIC_KEY`.
-5. `docker compose up -d --build`. The header should show **LIVE** and `Proxmox 8.x · <node>`.
+5. `docker compose up -d --build`. The header should show **Live** and `PVE 8.x · <node>`.
 
 ### Proxmox API token (short version)
 
@@ -238,7 +238,7 @@ Enable the secret-scanning pre-commit hook once: `git config core.hooksPath .git
 | Validation: cloud-init not completed | No DNS/internet on the test VLAN, broken snippet | `cloud-init status --long` on the VM console |
 | `Saved plan is stale` | State changed between plan and apply | Generate a new plan |
 | `VM ID … outside the allowed range` | Wrong environment/tfvars | Check `environments/*.tfvars` |
-| AI panel says `local-fallback` | No key, `AI_PROVIDER=none`, or provider unreachable | Expected offline; set `AI_PROVIDER=anthropic` + key |
+| Assistant shows *Local rules* | No key, `AI_PROVIDER=none`, or provider unreachable | Expected offline; set `AI_PROVIDER=anthropic` + key |
 
 Logs: `docker compose logs -f backend`. Reset demo data: `docker compose down -v`.
 

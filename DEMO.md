@@ -43,19 +43,19 @@ docker compose up -d
 docker compose ps          # both services "healthy"
 ```
 
-Open `http://localhost:8080`. Point at the header:
+Open `http://localhost:8080`. Point at the header and the progress bar below it:
 
-> "Top right: mode (LIVE or MOCK), the Proxmox version and node, OpenTofu, which AI model, and who I am for the audit trail."
+> "Top right: mode (Live or Mock), the Proxmox version and node, OpenTofu, which assistant (Claude or local rules), and who I am for the audit trail. The bar underneath tracks this VM from definition to production; the highlighted orange button is always the next step."
 
 ## 3:00 AI drafts a VM (AI moment 1)
 
-The prompt box is pre-filled: *"Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed."* Click **Generate VM spec**.
+The prompt box is pre-filled: *"Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed."* Open **Draft from a description** (open by default) and click **Draft spec**.
 
-**Expected:** a JSON draft with `demo-web-test`, `ubuntu-24-04`, 2 / 4096 / 40, packages `qemu-guest-agent`, `docker.io`.
+**Expected:** a draft card: name `demo-web-test`, Ubuntu 24.04, 2 vCPU · 4 GB · 40 GB, packages `qemu-guest-agent, docker.io`.
 
 > "The AI produces structured JSON, and then **our code validates it**: known template, within TEST limits, safe commands. It's a draft: nothing happened yet."
 
-Optional quick win: replace the prompt with *"production database with 64 cpus and 512 GB RAM"* → **Rejected by safety validation** with the exact limits. Then restore the original prompt (or just keep the first draft).
+Optional quick win: replace the prompt with *"production database with 64 cpus and 512 GB RAM"* → **Draft rejected** with the exact limits. Then restore the original prompt (or just keep the first draft).
 
 Click **Use this spec**.
 
@@ -63,7 +63,7 @@ Click **Use this spec**.
 
 Click **Generate Plan**.
 
-**Expected:** Plan panel `+1 create ~0 update -0 destroy`, VMID in 900–999, template 9000; full OpenTofu output. AI panel: **Risk: LOW**, summary, pre-flight checks, and the yellow note *"A human must review and explicitly approve every production change."*
+**Expected:** Plan card `1 to add · 0 to change · 0 to destroy`, a green *Create* row, VMID in 900–999, template 9000; the raw OpenTofu output under *OpenTofu output*. **Plan review** card: *Low risk*, a plain-language summary, a tickable *Before you continue* checklist, and the note that production changes always need a person.
 
 > "This is a real OpenTofu plan. The AI translates it into plain English and rates the risk. Important detail: risk is computed **twice**. If the AI says 'low' but the plan destroys something, our parser overrides it to HIGH. The AI can raise risk, never lower it."
 
@@ -79,27 +79,27 @@ Click **Deploy to Test**. Scroll to the **Job log**.
 
 ## 7:00 Failure → AI troubleshooting → recreate (AI moment 3)
 
-In **Validation**: tick **Simulate failure (mock)** (in live mode, skip this or use a VM on a VLAN without DNS). Click **Run validation**.
+In **Validation**: tick **Simulate failure (mock)** (in live mode, skip this or use a VM on a VLAN without DNS). Click **Validate**.
 
-**Expected:** `VM running ✔`, `Cloud-init completed ✖`, `Service health check ✖`, overall **FAIL**.
+**Expected:** *VM is running* ✔, *Cloud-init finished* ✖, *Service responds* ✖, status **Failed**; the progress bar marks Validate red.
 
-Click **✨ Ask AI to troubleshoot**.
+Click **Diagnose**.
 
-**Expected (AI panel):** likely cause = cloud-init didn't finish (package install, no DNS on test VLAN); immediate checks (`cloud-init status --long`); *Recreate appropriate*; *Stateless*.
+**Expected (inside the Validation card):** likely cause = cloud-init didn't finish (package install, no DNS on test VLAN); *Check first* (`cloud-init status --long`); *Safe fix*; pills *Recreate is safe* and *Stateless*.
 
 > "It tells me what to check, what's safe to do, and, importantly, whether recreating is OK or whether this VM might hold data and needs backup/restore instead. For a disposable TEST VM: recreate."
 
-Click **Recreate VM** → confirm.
+Click **Recreate VM** → the confirmation dialog explains the data loss → **Recreate**.
 
-**Expected:** Plan panel shows `-/+ replace` with the red **DESTRUCTIVE** banner, AI risk **HIGH**; job log `Destroying... Creating...`.
+**Expected:** Plan card shows a red *Replace* row and the **Destructive change** callout, Plan review says **High risk**; job log `Destroying... Creating...`.
 
 > "Note the AI flags this as HIGH risk because it destroys a VM. In TEST that's fine; in production the same action needs approval."
 
 ## 9:30 Validation passes
 
-Untick *Simulate failure*, click **Run validation**.
+Untick *Simulate failure*, click **Validate**.
 
-**Expected:** all four checks ✔ (IP from the guest agent, `boot-finished present`, `tcp/22 open`), **PASS**.
+**Expected:** all four checks ✔ (IP from the guest agent, `boot-finished present`, `tcp/…:22 open`), status **Passed**.
 
 ## 10:00 Production promotion
 
@@ -107,7 +107,7 @@ Point at the **Production approval** panel gates: *TEST validation passed ✔*.
 
 Click **Request Production Promotion**.
 
-**Expected:** job `awaiting_approval`; production plan `+1 create` for `demo-web`, VMID 100–299, full clone; AI risk **MEDIUM** (production change).
+**Expected:** the **Production approval** card gets an amber outline and *Awaiting approval*; production plan `1 to add` for `demo-web`, VMID 100–299; review **Medium risk** (production change).
 
 > "The spec was copied from the validated TEST VM. The production plan is ready, and **nothing has changed yet**. The job is parked."
 
@@ -117,7 +117,7 @@ Show that **Approve** is disabled. Tick *"I understand this will change producti
 
 Click **Approve & promote to production**.
 
-**Expected:** banner *"Production change applied."*; history shows `promote-approved` and `promote-apply → success`; Managed VMs lists `demo-web` in `prod`.
+**Expected:** toast *Production updated*; the progress bar completes; History shows *Promotion approved* and *Promote to production · Succeeded*; **Managed VMs** lists `demo-web` in Production.
 
 Optional (30 s): switch to **Production**, select `demo-web` from Managed VMs, click **Recreate VM** → the approval panel asks for `RECREATE`, the plan is DESTRUCTIVE and the AI says **HIGH** risk. Click **Reject**.
 
@@ -144,7 +144,7 @@ sed -i 's/^LIVE_MODE=.*/LIVE_MODE=false/' .env
 docker compose up -d backend          # recreates the backend with the new mode (~10 s)
 ```
 
-The header switches to **MOCK MODE**; every step above works identically (simulated VM IDs, IPs from 192.0.2.0/24). If the Anthropic API is unreachable, AI answers come from the local fallback automatically (`source: local-fallback`); no action needed.
+The header switches to **Mock mode**; every step above works identically (simulated VM IDs, IPs from 192.0.2.0/24). If the Anthropic API is unreachable, AI answers come from the local fallback automatically (`source: local-fallback`); no action needed.
 
 Say: *"The Proxmox host isn't reachable from here, so I'm switching to the built-in simulation. Same code paths, same guardrails, simulated hypervisor."*
 

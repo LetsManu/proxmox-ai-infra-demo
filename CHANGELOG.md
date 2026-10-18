@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 – 2026-10-18
+
+- Console redesign: flat dark design tokens (contrast-checked), Inter + JetBrains Mono bundled offline, Lucide SVG icons instead of emoji.
+- Workflow progress bar (Define → Production); the next step is the only primary button.
+- Toast notifications, confirmation dialog for destructive actions, status pills with icon + text, skeleton loading states.
+- Diagnosis shown inside the Validation card; tickable pre-flight checklist in the plan review.
+- Tables turn into cards on phones; 44px touch targets on touch devices; reduced-motion support.
+
 ## 1.0.0 – 2026-10-18
 
 Initial release for the live demonstration.

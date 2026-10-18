@@ -37,7 +37,7 @@ def validate(req: ValidateRequest):
             row.ip_address = result["ip_address"]
         if result["overall"] != "PASS":
             failed = ", ".join(c["name"] for c in result["checks"] if not c["ok"])
-            ctx.log(f"Failed checks: {failed}. Use 'Ask AI to troubleshoot' for guidance.")
+            ctx.log(f"Failed checks: {failed}. Use Diagnose in the Validation panel for guidance.")
             return JobOutcome(JobStatus.FAILED, f"Validation FAIL: {failed}")
         return f"Validation PASS ({result['ip_address']})"
 

@@ -113,4 +113,4 @@ The local fallback recognises: 401 token errors, 403 permission errors, cloud-in
 | "Put a web server straight into production" | Spec forced to TEST, warning about promotion |
 | "production database with 64 cpus and 512 GB RAM" | Rejected: exceeds limits |
 | Plan with a recreate in production | Risk HIGH, destroy listed, backup check first |
-| Failed validation (simulate failure) → "Ask AI to troubleshoot" | cloud-init cause, recreate appropriate for TEST |
+| Failed validation (simulate failure) → **Diagnose** | cloud-init cause, recreate appropriate for TEST |

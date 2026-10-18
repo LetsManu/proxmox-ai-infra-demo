@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { Layers, Server, FlaskConical, Radio, Boxes, Bot } from 'lucide-vue-next'
 import { api, pollJob } from './api.js'
 import VmCreateForm from './components/VmCreateForm.vue'
 import PlanPanel from './components/PlanPanel.vue'
@@ -8,14 +9,22 @@ import ValidationPanel from './components/ValidationPanel.vue'
 import PromotionPanel from './components/PromotionPanel.vue'
 import JobLogPanel from './components/JobLogPanel.vue'
 import HistoryTable from './components/HistoryTable.vue'
+import WorkflowSteps from './components/WorkflowSteps.vue'
+import StatusPill from './components/ui/StatusPill.vue'
+import Skeleton from './components/ui/Skeleton.vue'
+import ToastHost from './components/ui/ToastHost.vue'
+import ConfirmDialog from './components/ui/ConfirmDialog.vue'
+import { toast } from './components/ui/toast.js'
+import { confirm } from './components/ui/confirm.js'
 
 const env = ref('test')
 const health = ref(null)
 const pxStatus = ref(null)
-const templates = ref([])
+const templates = ref(null)
 const environments = ref([])
-const vms = ref([])
-const history = ref([])
+const vms = ref(null)
+const history = ref(null)
+const historyError = ref('')
 
 const form = reactive({
   name: 'demo-web-test',
@@ -35,20 +44,25 @@ const planSummary = ref(null)
 const summaryLoading = ref(false)
 const activeJob = ref(null)
 const validationJob = ref(null)
+const validateOpts = reactive({ useHealth: true, port: 22, simulateFailure: false })
 const approvalJob = ref(null)
 const approvalSummary = ref(null)
+const approvalSummaryLoading = ref(false)
 const troubleshootResult = ref(null)
 const troubleshootLoading = ref(false)
 const busy = ref('')
-const error = ref('')
-const notice = ref('')
 
 const policy = computed(() => environments.value.find((e) => e.key === env.value))
 const spec = computed(() => ({ ...JSON.parse(JSON.stringify(form)), environment: env.value }))
 const planMatchesForm = computed(() => plannedSpecJson.value === JSON.stringify(spec.value))
-const currentVm = computed(() => vms.value.find((v) => v.name === form.name && v.environment === env.value))
-const testVm = computed(() => vms.value.find((v) => v.name === form.name && v.environment === 'test'))
+const vmList = computed(() => vms.value || [])
+const currentVm = computed(() => vmList.value.find((v) => v.name === form.name && v.environment === env.value))
+const testName = computed(() => (env.value === 'test' ? form.name : `${form.name}-test`))
+const prodName = computed(() => form.name.replace(/-test$/, ''))
+const testVm = computed(() => vmList.value.find((v) => v.name === testName.value && v.environment === 'test'))
+const prodVm = computed(() => vmList.value.find((v) => v.name === prodName.value && v.environment === 'prod'))
 const isMock = computed(() => health.value && !health.value.settings.live_mode)
+const awaiting = computed(() => approvalJob.value?.status === 'awaiting_approval')
 
 const can = computed(() => ({
   plan: !busy.value,
@@ -57,20 +71,73 @@ const can = computed(() => ({
     env.value === 'test' &&
     planJob.value?.status === 'success' &&
     planJob.value?.environment === 'test' &&
+    planJob.value?.action === 'plan' &&
     planMatchesForm.value &&
     !planJob.value?.result?.applied,
   validate: !busy.value && !!currentVm.value,
-  promote: !busy.value && testVm.value?.last_validation === 'PASS',
+  promote: !busy.value && testVm.value?.last_validation === 'PASS' && !awaiting.value,
   recreate: !busy.value && !!currentVm.value,
 }))
 
-const deployHint = computed(() => {
-  if (env.value !== 'test') return 'Production is only reachable through promotion.'
-  if (!planJob.value) return 'Generate a plan first.'
-  if (planJob.value.status !== 'success') return 'Plan must succeed first.'
-  if (!planMatchesForm.value) return 'Form changed since the plan. Generate a new plan.'
-  if (planJob.value.result?.applied) return 'Plan already applied.'
-  return ''
+const hints = computed(() => ({
+  deploy:
+    env.value !== 'test'
+      ? 'Production is only reachable through promotion'
+      : !planJob.value || planJob.value.action !== 'plan'
+        ? 'Generate a plan first'
+        : !planMatchesForm.value
+          ? 'The form changed since the plan. Generate a new plan.'
+          : planJob.value.result?.applied
+            ? 'This plan was already applied'
+            : '',
+  validate: currentVm.value ? '' : `Deploy ${form.name} first`,
+  promote: awaiting.value
+    ? 'A promotion is waiting for approval'
+    : testVm.value?.last_validation === 'PASS'
+      ? ''
+      : 'Needs a passing validation of the TEST VM',
+  recreate: currentVm.value ? '' : 'Nothing deployed under this name',
+}))
+
+function planDetail(c) {
+  if (!c) return ''
+  const parts = [c.create && `${c.create} add`, c.update && `${c.update} change`, c.destroy && `${c.destroy} destroy`].filter(Boolean)
+  return parts.join(' · ') || 'No changes'
+}
+
+// Workflow progress for the VM lineage <name>-test -> <name>
+const steps = computed(() => {
+  const planned = planJob.value?.status === 'success' && planJob.value.environment === 'test'
+  const deployed = !!testVm.value
+  const validation = testVm.value?.last_validation
+  const s = [
+    { key: 'define', label: 'Define', detail: testName.value, done: true },
+    { key: 'plan', label: 'Plan', detail: planned ? planDetail(planJob.value.result?.plan?.counts) : '', done: planned || deployed },
+    { key: 'deploy', label: 'Deploy to Test', detail: deployed ? `VMID ${testVm.value.vmid}` : '', done: deployed },
+    {
+      key: 'validate', label: 'Validate',
+      detail: validation === 'PASS' ? 'Passed' : validation === 'FAIL' ? 'Failed' : '',
+      done: validation === 'PASS', error: validation === 'FAIL',
+    },
+    { key: 'approve', label: 'Approval', detail: awaiting.value ? 'Waiting for you' : prodVm.value ? 'Approved' : '', done: !!prodVm.value },
+    { key: 'prod', label: 'Production', detail: prodVm.value ? `VMID ${prodVm.value.vmid}` : '', done: !!prodVm.value },
+  ]
+  let foundCurrent = false
+  return s.map((x) => {
+    let state = x.done ? 'done' : 'todo'
+    if (!x.done && !foundCurrent) {
+      state = x.error ? 'error' : 'current'
+      foundCurrent = true
+    }
+    return { ...x, state }
+  })
+})
+
+// The one primary button is always the next step.
+const nextAction = computed(() => {
+  const cur = steps.value.find((s) => s.state === 'current' || s.state === 'error')?.key
+  if (env.value === 'prod' || awaiting.value) return null
+  return { plan: 'plan', define: 'plan', deploy: can.value.deploy ? 'deploy' : 'plan', validate: 'validate', approve: 'promote' }[cur] || null
 })
 
 watch(env, (e) => {
@@ -86,8 +153,9 @@ watch(env, (e) => {
 async function refresh() {
   try {
     ;[vms.value, history.value] = await Promise.all([api.vms(), api.history()])
+    historyError.value = ''
   } catch (e) {
-    error.value = e.message
+    historyError.value = e.message
   }
 }
 
@@ -100,21 +168,18 @@ async function loadInventory() {
     ])
     pxStatus.value = await api.proxmoxStatus()
   } catch (e) {
-    error.value = `Backend unreachable: ${e.message}`
+    toast.error(e.message, { title: 'Backend unreachable', duration: 0 })
   }
   await refresh()
 }
 
 async function track(kind, start) {
-  error.value = ''
-  notice.value = ''
   busy.value = kind
   try {
     const { job_id } = await start()
-    const job = await pollJob(job_id, (j) => (activeJob.value = j))
-    return job
+    return await pollJob(job_id, (j) => (activeJob.value = j))
   } catch (e) {
-    error.value = e.message
+    toast.error(e.message)
     return null
   } finally {
     busy.value = ''
@@ -122,16 +187,16 @@ async function track(kind, start) {
   }
 }
 
-async function summarize(job, target) {
+async function summarize(job, target, loading) {
   const text = job?.result?.plan?.text
   if (!text) return
-  summaryLoading.value = true
+  loading.value = true
   try {
     target.value = await api.summarizePlan(text, job.environment)
   } catch (e) {
-    error.value = `AI summary failed: ${e.message}`
+    toast.error(e.message, { title: 'Plan review failed' })
   } finally {
-    summaryLoading.value = false
+    loading.value = false
   }
 }
 
@@ -142,23 +207,33 @@ async function generatePlan() {
   if (!job) return
   planJob.value = job
   plannedSpecJson.value = snapshot
-  if (job.status === 'success') await summarize(job, planSummary)
+  if (job.status === 'success') await summarize(job, planSummary, summaryLoading)
+  else toast.error(job.error || 'Plan failed', { title: 'Plan failed' })
 }
 
 async function deployTest() {
   const job = await track('deploy', () => api.deployTest(spec.value, planJob.value.id))
   if (job?.status === 'success') {
     planJob.value = { ...planJob.value, result: { ...planJob.value.result, applied: true } }
-    notice.value = `Deployed ${form.name} to TEST. Next: Validate.`
-  }
+    toast.success(`${form.name} is running in Test. Validate it next.`, { title: 'Deployed' })
+  } else if (job) toast.error(job.error || 'Deployment failed', { title: 'Deployment failed' })
 }
 
-async function validate(opts) {
+async function validate() {
   troubleshootResult.value = null
   const job = await track('validate', () =>
-    api.validate({ name: form.name, environment: env.value, ...opts }),
+    api.validate({
+      name: form.name,
+      environment: env.value,
+      health_check_port: validateOpts.useHealth ? validateOpts.port : null,
+      simulate_failure: isMock.value && validateOpts.simulateFailure,
+    }),
   )
-  if (job) validationJob.value = job
+  if (!job) return
+  validationJob.value = job
+  const overall = job.result?.validation?.overall
+  if (overall === 'PASS') toast.success(`All checks passed for ${form.name}.`, { title: 'Validation passed' })
+  else if (overall === 'FAIL') toast.error('Some checks failed. Ask the assistant for a diagnosis.', { title: 'Validation failed' })
 }
 
 async function troubleshoot() {
@@ -171,7 +246,7 @@ async function troubleshoot() {
       proxmox_status: currentVm.value,
     })
   } catch (e) {
-    error.value = e.message
+    toast.error(e.message)
   } finally {
     troubleshootLoading.value = false
   }
@@ -180,9 +255,11 @@ async function troubleshoot() {
 async function requestPromotion() {
   approvalSummary.value = null
   const job = await track('promote', () => api.promote({ name: testVm.value.name, stage: 'request' }))
-  if (job) {
-    approvalJob.value = job
-    if (job.status === 'awaiting_approval') await summarize(job, approvalSummary)
+  if (!job) return
+  approvalJob.value = job
+  if (job.status === 'awaiting_approval') {
+    toast.info('Review the production plan below. Nothing has changed yet.', { title: 'Approval required' })
+    await summarize(job, approvalSummary, approvalSummaryLoading)
   }
 }
 
@@ -197,32 +274,41 @@ async function decide({ stage, acknowledge, confirmation }) {
     try {
       await call()
       approvalJob.value = { ...job, status: 'failed', result: { ...job.result, decision: 'rejected' } }
-      notice.value = 'Rejected. Nothing was changed in production.'
+      toast.info('Nothing was changed in production.', { title: 'Rejected' })
     } catch (e) {
-      error.value = e.message
+      toast.error(e.message)
     }
     refresh()
     return
   }
   const result = await track('approve', call)
-  if (result) {
-    approvalJob.value = { ...job, status: 'success', result: { ...job.result, decision: 'approved' } }
-    if (result.status === 'success') notice.value = 'Production change applied.'
-  }
+  if (!result) return
+  approvalJob.value = { ...job, status: 'success', result: { ...job.result, decision: 'approved' } }
+  if (result.status === 'success') toast.success(result.result?.summary || 'Change applied.', { title: 'Production updated' })
+  else toast.error(result.error || 'Apply failed', { title: 'Production apply failed' })
 }
 
 async function recreate() {
-  const where = env.value === 'prod' ? 'PRODUCTION (requires approval)' : 'TEST'
-  if (!confirm(`Recreate ${form.name} in ${where}? The VM is destroyed and cloned again from its template.`)) return
+  const prod = env.value === 'prod'
+  const ok = await confirm({
+    title: `Recreate ${form.name}?`,
+    body: prod
+      ? 'A destroy-and-recreate plan is prepared for production. It still needs your approval before anything happens.'
+      : 'The VM is destroyed and cloned again from its template. Anything stored on its disk is lost.',
+    danger: true,
+    confirmLabel: prod ? 'Prepare plan' : 'Recreate',
+  })
+  if (!ok) return
   const job = await track('recreate', () => api.recreate({ name: form.name, environment: env.value }))
   if (job?.status === 'awaiting_approval') {
     approvalJob.value = job
     approvalSummary.value = null
-    await summarize(job, approvalSummary)
+    toast.info('Destructive plan prepared. Approve it below or reject it.', { title: 'Approval required' })
+    await summarize(job, approvalSummary, approvalSummaryLoading)
   } else if (job?.status === 'success') {
     planJob.value = job
-    notice.value = 'TEST VM recreated. Validation was reset: run Validate again.'
-    await summarize(job, planSummary)
+    toast.success('Validation was reset. Run Validate again.', { title: `${form.name} recreated` })
+    await summarize(job, planSummary, summaryLoading)
   }
 }
 
@@ -238,7 +324,7 @@ function applyGeneratedSpec(s) {
     description: s.description || '',
     cloud_init: s.cloud_init,
   })
-  notice.value = 'AI draft loaded into the form. Review it, then Generate Plan.'
+  toast.info('Review the values, then generate a plan.', { title: 'Draft applied' })
 }
 
 function selectVm(vm) {
@@ -254,7 +340,17 @@ function selectVm(vm) {
     ssh_public_key: vm.spec.ssh_public_key || '',
     cloud_init: vm.spec.cloud_init || { packages: [], commands: [] },
   })
+  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
+
+const initials = computed(() =>
+  (health.value?.settings.user || '')
+    .split(/[-_. ]/)
+    .map((p) => p[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase(),
+)
 
 let timer
 onMounted(() => {
@@ -265,119 +361,173 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
-  <header class="topbar">
-    <div class="brand">
-      <div class="logo">PX</div>
-      <div>
-        <h1>Proxmox AI Infra Console</h1>
-        <p class="muted">Template → Plan → Test → Validate → Approve → Production</p>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"><Layers :size="18" /></span>
+        <div class="brand-text">
+          <span class="name">Proxmox <span class="hide-xs">Infra </span>Console</span>
+          <span class="tagline">Plan · Test · Validate · Approve</span>
+        </div>
       </div>
-    </div>
-    <div class="status-pills">
-      <span v-if="health" class="pill" :class="health.settings.live_mode ? 'ok' : 'warn'">
-        {{ health.settings.live_mode ? 'LIVE' : 'MOCK MODE' }}
-      </span>
-      <span v-if="pxStatus" class="pill" :class="pxStatus.connected ? 'ok' : 'bad'" :title="pxStatus.error || ''">
-        Proxmox {{ pxStatus.connected ? `${pxStatus.version?.version} · ${pxStatus.nodes?.[0]?.node}` : 'unreachable' }}
-      </span>
-      <span v-if="health" class="pill neutral">
-        IaC: {{ health.settings.iac_binary === 'tofu' ? 'OpenTofu' : 'Terraform' }}
-      </span>
-      <span v-if="health" class="pill neutral">
-        AI: {{ health.settings.ai_model || 'local fallback' }}
-      </span>
-      <span v-if="health" class="pill neutral">👤 {{ health.settings.user }}</span>
+
+      <div class="env" role="radiogroup" aria-label="Environment">
+        <button
+          v-for="e in [{ key: 'test', label: 'Test' }, { key: 'prod', label: 'Production' }]"
+          :key="e.key"
+          type="button"
+          role="radio"
+          :aria-checked="env === e.key"
+          :class="['seg', { active: env === e.key, prod: e.key === 'prod' }]"
+          @click="env = e.key"
+        >
+          <span class="seg-dot" aria-hidden="true" />{{ e.label }}
+        </button>
+      </div>
+
+      <div class="status">
+        <template v-if="health">
+          <StatusPill v-if="isMock" tone="warn" :icon="FlaskConical" label="Mock mode" />
+          <StatusPill v-else tone="ok" :icon="Radio" label="Live" />
+        </template>
+        <Skeleton v-else w="88px" h="22px" radius="99px" />
+        <template v-if="pxStatus">
+          <StatusPill
+            :tone="pxStatus.connected ? 'muted' : 'err'"
+            :icon="Server"
+            :label="pxStatus.connected ? `PVE ${pxStatus.version?.version} · ${pxStatus.nodes?.[0]?.node}` : 'Proxmox unreachable'"
+            :title="pxStatus.error || ''"
+          />
+        </template>
+        <Skeleton v-else w="120px" h="22px" radius="99px" />
+        <StatusPill v-if="health" class="hide-md" tone="muted" :icon="Boxes" :label="health.settings.iac_binary === 'tofu' ? 'OpenTofu' : 'Terraform'" />
+        <StatusPill
+          v-if="health"
+          class="hide-md"
+          tone="muted"
+          :icon="Bot"
+          :label="health.settings.ai_model ? 'Claude' : 'Local rules'"
+          :title="health.settings.ai_model || 'No AI key configured: deterministic local analysis'"
+        />
+        <span v-if="initials" class="avatar" :title="`Signed in as ${health.settings.user}`">{{ initials }}</span>
+      </div>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="env-bar card">
-      <div class="segmented" role="tablist" aria-label="Environment">
-        <button :class="{ active: env === 'test' }" @click="env = 'test'">Test</button>
-        <button :class="{ active: env === 'prod', prod: true }" @click="env = 'prod'">Production</button>
+  <WorkflowSteps :steps="steps" />
+
+  <main id="main" class="layout">
+    <div class="cols">
+      <div class="col-left">
+        <VmCreateForm
+          v-model="form"
+          :env="env"
+          :policy="policy"
+          :templates="templates"
+          :environments="environments"
+          @apply-spec="applyGeneratedSpec"
+        >
+          <div class="actions">
+            <button class="btn" :class="{ primary: nextAction === 'plan' }" :disabled="!can.plan" :aria-busy="busy === 'plan'" @click="generatePlan">
+              <span v-if="busy === 'plan'" class="spinner" />Generate Plan
+            </button>
+            <button class="btn" :class="{ primary: nextAction === 'deploy' }" :disabled="!can.deploy" :title="hints.deploy" :aria-busy="busy === 'deploy'" @click="deployTest">
+              <span v-if="busy === 'deploy'" class="spinner" />Deploy to Test
+            </button>
+            <button class="btn" :class="{ primary: nextAction === 'validate' }" :disabled="!can.validate" :title="hints.validate" :aria-busy="busy === 'validate'" @click="validate">
+              <span v-if="busy === 'validate'" class="spinner" />Validate
+            </button>
+            <button class="btn" :class="{ primary: nextAction === 'promote' }" :disabled="!can.promote" :title="hints.promote" :aria-busy="busy === 'promote'" @click="requestPromotion">
+              <span v-if="busy === 'promote'" class="spinner" />Request Production Promotion
+            </button>
+            <span class="spacer" />
+            <button class="btn danger" :disabled="!can.recreate" :title="hints.recreate" :aria-busy="busy === 'recreate'" @click="recreate">
+              <span v-if="busy === 'recreate'" class="spinner" />Recreate VM
+            </button>
+          </div>
+          <p v-if="env === 'test' && planJob && hints.deploy && ['plan', 'deploy'].includes(nextAction)" class="hint">{{ hints.deploy }}</p>
+          <p v-else-if="env === 'prod'" class="hint">Production VMs are created only by promoting a validated Test VM.</p>
+        </VmCreateForm>
       </div>
-      <p v-if="policy" class="muted env-desc">
-        <strong>{{ policy.label }}:</strong> {{ policy.description }}
-        VM IDs {{ policy.vmid_min }}–{{ policy.vmid_max }} · {{ policy.network.label }} ·
-        {{ policy.full_clone ? 'full clone' : 'linked clone' }} · max {{ policy.max_cores }} vCPU /
-        {{ policy.max_memory_mb / 1024 }} GB / {{ policy.max_disk_gb }} GB
-      </p>
-    </section>
 
-    <div v-if="error" class="banner error" @click="error = ''">⚠ {{ error }}</div>
-    <div v-if="notice" class="banner info" @click="notice = ''">✓ {{ notice }}</div>
-
-    <div class="grid two">
-      <VmCreateForm
-        v-model="form"
-        :env="env"
-        :policy="policy"
-        :templates="templates"
-        :environments="environments"
-        @apply-spec="applyGeneratedSpec"
-      >
-        <div class="actions">
-          <button class="btn primary" :disabled="!can.plan" @click="generatePlan">
-            <span v-if="busy === 'plan'" class="spinner" />Generate Plan
-          </button>
-          <button class="btn success" :disabled="!can.deploy" :title="deployHint" @click="deployTest">
-            <span v-if="busy === 'deploy'" class="spinner" />Deploy to Test
-          </button>
-          <button class="btn" :disabled="!can.validate" @click="validate({})">
-            <span v-if="busy === 'validate'" class="spinner" />Validate
-          </button>
-          <button
-            class="btn warn"
-            :disabled="!can.promote"
-            :title="can.promote ? '' : 'Requires a PASSING validation of the TEST VM'"
-            @click="requestPromotion"
-          >
-            <span v-if="busy === 'promote'" class="spinner" />Request Production Promotion
-          </button>
-          <button class="btn danger-outline" :disabled="!can.recreate" @click="recreate">
-            <span v-if="busy === 'recreate'" class="spinner" />Recreate VM
-          </button>
-        </div>
-        <p v-if="deployHint && env === 'test' && planJob" class="hint">{{ deployHint }}</p>
-      </VmCreateForm>
-
-      <div class="stack">
-        <PlanPanel :job="planJob" :stale="!!planJob && !planMatchesForm" />
-        <AiSummaryPanel
-          :summary="planSummary"
-          :loading="summaryLoading && !approvalJob"
+      <div class="col-right">
+        <PlanPanel :job="planJob" :stale="!!planJob && planJob.action === 'plan' && !planMatchesForm" :busy="busy === 'plan'" />
+        <AiSummaryPanel :summary="planSummary" :loading="summaryLoading" />
+        <ValidationPanel
+          :job="validationJob"
+          :vm="currentVm"
+          :mock="isMock"
+          :options="validateOpts"
+          :running="busy === 'validate'"
           :troubleshoot="troubleshootResult"
           :troubleshoot-loading="troubleshootLoading"
+          @troubleshoot="troubleshoot"
+        />
+        <PromotionPanel
+          :job="approvalJob"
+          :summary="approvalSummary"
+          :summary-loading="approvalSummaryLoading"
+          :test-vm="testVm"
+          :busy="!!busy"
+          :approving="busy === 'approve'"
+          @decide="decide"
         />
       </div>
     </div>
 
-    <div class="grid two">
-      <ValidationPanel
-        :job="validationJob"
-        :vm="currentVm"
-        :env="env"
-        :mock="isMock"
-        :busy="!!busy"
-        :troubleshoot-loading="troubleshootLoading"
-        @validate="validate"
-        @troubleshoot="troubleshoot"
-      />
-      <PromotionPanel
-        :job="approvalJob"
-        :summary="approvalSummary"
-        :summary-loading="summaryLoading"
-        :test-vm="testVm"
-        :busy="!!busy"
-        @decide="decide"
-      />
-    </div>
-
     <JobLogPanel :job="activeJob" />
-    <HistoryTable :history="history" :vms="vms" @select="selectVm" />
+    <HistoryTable :history="history" :vms="vms" :error="historyError" @select="selectVm" @retry="refresh" />
   </main>
 
-  <footer class="footer muted">
-    The browser never receives Proxmox credentials. Production changes always require human approval.
+  <footer class="footer">
+    Proxmox credentials never reach the browser. Production changes always need a person to approve them.
   </footer>
+
+  <ToastHost />
+  <ConfirmDialog />
 </template>
+
+<style scoped>
+.header { position: sticky; top: 0; z-index: 50; background: rgba(16, 20, 24, .92); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.header-inner { max-width: 1440px; margin: 0 auto; height: var(--header-h); padding: 0 var(--pad-x); display: flex; align-items: center; gap: 1.25rem; }
+.brand { display: flex; align-items: center; gap: .7rem; min-width: 0; }
+.logo { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, #f07a22, #b85400); }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.name { font-weight: 650; font-size: .98rem; letter-spacing: -.01em; white-space: nowrap; }
+.tagline { font-size: .74rem; color: var(--dim); white-space: nowrap; }
+
+.env { display: inline-flex; padding: 3px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-left: .5rem; }
+.seg { font: inherit; font-size: .86rem; font-weight: 600; border: 0; background: transparent; color: var(--mut); padding: 0 .9rem; min-height: 32px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: .45rem; transition: background var(--t-fast), color var(--t-fast); }
+.seg:hover { color: var(--fg); }
+.seg-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+.seg.active { background: var(--surface-3); color: var(--fg); }
+.seg.active .seg-dot { background: var(--info); }
+.seg.active.prod .seg-dot { background: var(--err); }
+@media (pointer: coarse) { .seg { min-height: 40px; } }
+
+.status { margin-left: auto; display: flex; align-items: center; gap: .4rem; min-width: 0; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-3); color: var(--mut); font-size: .72rem; font-weight: 700; display: grid; place-items: center; margin-left: .35rem; flex: none; }
+
+.layout { max-width: 1440px; margin: 0 auto; padding: 1.25rem var(--pad-x) 1rem; display: flex; flex-direction: column; gap: 1rem; }
+.cols { display: grid; grid-template-columns: minmax(360px, 440px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.col-left { position: sticky; top: calc(var(--header-h) + 1rem); }
+.col-right { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.spacer { flex: 1; }
+.hint { margin-top: .6rem; font-size: .8rem; color: var(--dim); }
+.footer { text-align: center; color: var(--dim); font-size: .78rem; padding: 1.5rem var(--pad-x) 2.5rem; }
+
+@media (max-width: 1240px) { .hide-md { display: none; } }
+@media (max-width: 1020px) {
+  .cols { grid-template-columns: 1fr; }
+  .col-left { position: static; }
+}
+@media (max-width: 720px) {
+  .header-inner { gap: .6rem; }
+  .tagline, .status :deep(.pill:not(:first-child)), .avatar { display: none; }
+  .env { margin-left: auto; }
+  .status { margin-left: 0; }
+}
+@media (max-width: 420px) { .name { font-size: .9rem; } .hide-xs { display: none; } .status { display: none; } .seg { padding: 0 .65rem; } }
+</style>

@@ -103,7 +103,7 @@ curl -sS -H "Authorization: PVEAPIToken=automation@pve!infra-demo=$PROXMOX_TOKEN
   https://<proxmox-host>:8006/api2/json/nodes | jq
 ```
 
-Then start the console with `LIVE_MODE=true`; the header shows `Proxmox 8.x · <node>` and the template dropdown shows no "missing!" entries.
+Then start the console with `LIVE_MODE=true`; the header shows `PVE 8.x · <node>` and the operating-system field shows no "not found on the node" warning.
 
 ## Rotation
 
