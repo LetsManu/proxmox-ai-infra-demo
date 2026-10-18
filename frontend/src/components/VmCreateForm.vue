@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, CircleAlert, PenLine, TriangleAlert, Package } from 'lucide-vue-next'
+import { ChevronDown, CircleAlert, PenLine, TriangleAlert, Package, RefreshCw, X } from 'lucide-vue-next'
 import { api } from '../api.js'
 import StatusPill from './ui/StatusPill.vue'
 import Skeleton from './ui/Skeleton.vue'
@@ -13,7 +13,7 @@ const props = defineProps({
   environments: { type: Array, default: () => [] },
   profiles: { type: Array, default: () => [] },
 })
-const emit = defineEmits(['apply-spec'])
+const emit = defineEmits(['apply-spec', 'reload-profiles'])
 const f = props.modelValue
 
 const prompt = ref(
@@ -28,10 +28,26 @@ const memoryGb = computed({
   get: () => f.memory_mb / 1024,
   set: (v) => (f.memory_mb = Math.round(Number(v) * 1024)),
 })
-const packages = computed({
-  get: () => (f.cloud_init?.packages || []).join(', '),
-  set: (v) => (f.cloud_init.packages = v.split(',').map((s) => s.trim()).filter(Boolean)),
+const pkgInput = ref('')
+const PKG_RE = { linux: /^[a-z0-9][a-z0-9.+-]{0,62}(=[A-Za-z0-9.+:~-]{1,40})?$/, windows: /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/ }
+const pkgError = ref('')
+function addPackages() {
+  const names = pkgInput.value.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)
+  const bad = names.filter((n) => !PKG_RE[osFamily.value].test(n))
+  if (bad.length) {
+    pkgError.value = `Not a valid ${isWindows.value ? 'Chocolatey' : 'apt'} package name: ${bad.join(', ')}`
+    return
+  }
+  pkgError.value = ''
+  f.packages = [...new Set([...(f.packages || []), ...names])]
+  pkgInput.value = ''
+}
+watch(pkgInput, (v) => {
+  if (!v) pkgError.value = ''
 })
+function removePackage(name) {
+  f.packages = (f.packages || []).filter((p) => p !== name)
+}
 const network = computed(() => props.environments.find((e) => e.key === props.env)?.network)
 const nameValid = computed(() => /^[a-z][a-z0-9-]{1,40}[a-z0-9]$/.test(f.name))
 const selectedTemplate = computed(() => props.templates?.find((t) => t.key === f.template))
@@ -46,9 +62,10 @@ const isWindows = computed(() => osFamily.value === 'windows')
 const availableProfiles = computed(() => props.profiles.filter((p) => p.os_family === osFamily.value))
 const PROFILE_LABEL = computed(() => Object.fromEntries(props.profiles.map((p) => [p.key, p.label])))
 
-// Switching OS family drops profiles that don't apply
-watch(osFamily, (fam) => {
+// Switching OS family drops profiles and package names that don't apply
+watch(osFamily, (fam, old) => {
   f.profiles = (f.profiles || []).filter((k) => props.profiles.find((p) => p.key === k)?.os_family === fam)
+  if (old && fam !== old) f.packages = []
 })
 
 function toggleProfile(key, on) {
@@ -116,7 +133,7 @@ function useDraft() {
             <div><dt>OS</dt><dd>{{ OS_LABEL[draft.spec.template] }}</dd></div>
             <div><dt>Size</dt><dd class="num">{{ draft.spec.cores }} vCPU · {{ draft.spec.memory_mb / 1024 }} GB · {{ draft.spec.disk_gb }} GB</dd></div>
             <div><dt>Software</dt><dd>{{ (draft.spec.profiles || []).map((k) => PROFILE_LABEL[k] || k).join(', ') || 'Base only' }}</dd></div>
-            <div v-if="draft.spec.cloud_init.packages.length"><dt>Packages</dt><dd class="mono">{{ draft.spec.cloud_init.packages.join(', ') }}</dd></div>
+            <div v-if="draft.spec.packages?.length"><dt>Packages</dt><dd class="mono">{{ draft.spec.packages.join(', ') }}</dd></div>
           </dl>
           <ul v-if="draft.warnings?.length" class="warnings">
             <li v-for="w in draft.warnings" :key="w"><TriangleAlert :size="14" />{{ w }}</li>
@@ -183,21 +200,44 @@ function useDraft() {
 
       <fieldset class="span2 software">
         <legend><Package :size="15" />Software <span class="dim">installed by Ansible after deploy</span></legend>
+        <div class="sw-head">
+          <span class="dim small">{{ availableProfiles.length }} profiles for {{ isWindows ? 'Windows' : 'Linux' }}</span>
+          <button type="button" class="btn quiet sm" title="Re-read the profile folders" @click="emit('reload-profiles')"><RefreshCw :size="13" />Refresh</button>
+        </div>
         <label v-for="p in availableProfiles" :key="p.key" class="sw">
           <input type="checkbox" :checked="(f.profiles || []).includes(p.key)" @change="toggleProfile(p.key, $event.target.checked)" />
-          <span><span class="sw-name">{{ p.label }}</span><span class="sw-desc">{{ p.description }}</span></span>
+          <span>
+            <span class="sw-name">{{ p.label }}<span v-if="p.source !== 'built-in'" class="src">{{ p.source === 'profiles' ? 'Project' : p.source }}</span></span>
+            <span class="sw-desc">{{ p.description }}</span>
+          </span>
         </label>
+        <p v-if="!availableProfiles.length" class="dim small">No profiles for this OS yet. Add a role folder with a profile.yml (profiles/README.md).</p>
+
+        <div class="field pkgs">
+          <label class="label" for="pkg-input">Extra packages <span class="hint-inline">{{ isWindows ? 'Chocolatey IDs' : 'apt names' }}</span></label>
+          <div class="chips" :class="{ invalid: pkgError }">
+            <span v-for="p in f.packages || []" :key="p" class="chip mono">{{ p }}<button type="button" :aria-label="`Remove ${p}`" @click="removePackage(p)"><X :size="12" /></button></span>
+            <input
+              id="pkg-input"
+              v-model="pkgInput"
+              class="mono-input"
+              :placeholder="isWindows ? 'googlechrome vscode' : 'redis-server git'"
+              autocomplete="off"
+              spellcheck="false"
+              @keydown.enter.prevent="addPackages"
+              @keydown.,.prevent="addPackages"
+              @blur="pkgInput && addPackages()"
+            />
+          </div>
+          <span v-if="pkgError" class="error"><CircleAlert :size="13" />{{ pkgError }}</span>
+          <span v-else class="hint">Any package from the {{ isWindows ? 'Chocolatey community repository' : 'distribution repositories' }}; installed by the package manager, never as a command. Enter to add.</span>
+        </div>
         <p class="dim small">Base configuration (updates, guest agent, {{ isWindows ? 'time zone, firewall' : 'SSH hardening' }}) is always applied.</p>
       </fieldset>
 
       <details class="disclosure span2">
         <summary>Optional settings <ChevronDown :size="15" /></summary>
         <div class="optional">
-          <label v-if="!isWindows" class="field">
-            <span class="label">Extra packages</span>
-            <input v-model="packages" class="mono-input" placeholder="qemu-guest-agent, docker.io" />
-            <span class="hint">Comma separated, installed by cloud-init</span>
-          </label>
           <label class="field">
             <span class="label">Description</span>
             <input v-model="f.description" maxlength="500" placeholder="What is this VM for?" />
@@ -255,6 +295,17 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .sw > span { display: flex; flex-direction: column; }
 .sw-name { color: var(--fg); }
 .sw-desc { color: var(--dim); font-size: 12px; }
+.sw-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .1rem; }
+.src { margin-left: .45rem; font-size: 11px; padding: 0 .35rem; border-radius: 3px; background: var(--tone-info); color: var(--info); }
+.pkgs { margin-top: .5rem; }
+.chips { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; background: var(--input); border: 1px solid #555; border-radius: var(--radius-sm); padding: .25rem .3rem; min-height: 32px; }
+.chips:focus-within { border-color: var(--acc); }
+.chips.invalid { border-color: var(--err); }
+.chips input { flex: 1; min-width: 120px; border: 0; background: transparent; padding: .15rem .3rem; min-height: 24px; }
+.chips input:focus { box-shadow: none; }
+.chip { display: inline-flex; align-items: center; gap: .2rem; background: var(--surface-3); border-radius: 3px; padding: .1rem .2rem .1rem .45rem; font-size: 12px; }
+.chip button { background: transparent; border: 0; color: var(--mut); cursor: pointer; display: grid; place-items: center; padding: .1rem; border-radius: 2px; }
+.chip button:hover { color: var(--fg); background: rgba(255, 255, 255, .1); }
 .card-foot { background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 @media (max-width: 520px) {
   .form { grid-template-columns: 1fr; }

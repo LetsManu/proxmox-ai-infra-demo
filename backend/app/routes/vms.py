@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
 
-from ..config import ENVIRONMENTS, PROFILE_CATALOG, get_settings, placement, public_settings
+from ..config import ENVIRONMENTS, get_settings, placement, public_settings
 from ..database import session_scope
 from ..models import Job, JobStatus, VirtualMachine
 from ..schemas import NETWORKS, ConfigureRequest, DeployTestRequest, JobCreated, PowerRequest, RecreateRequest, VmOut
@@ -48,7 +48,10 @@ def templates():
 
 @router.get("/profiles")
 def profiles():
-    return PROFILE_CATALOG
+    """Discovered software profiles (built-in and project role folders), re-read on every call."""
+    from ..services.profile_service import load_profiles
+
+    return load_profiles(get_settings())
 
 
 @router.get("/environments")

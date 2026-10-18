@@ -64,6 +64,8 @@ class Settings(BaseSettings):
 
     # --- Configuration management (Ansible) -------------------------------
     ansible_dir: str = "/app/infra/ansible"
+    extra_profile_dirs: str = ""  # project role folders with profile.yml, ":"-separated (e.g. /profiles)
+    package_denylist: str = ""  # comma-separated package names users and the AI may not install
     ansible_ssh_key_file: str = ""  # private key matching DEFAULT_SSH_PUBLIC_KEY (Docker secret)
     windows_admin_password: SecretStr = SecretStr("")
     # Optional SSH access to the node for the provider (cloud-init snippet upload)
@@ -223,22 +225,6 @@ def template_entry(key: str) -> dict | None:
     return next((t for t in TEMPLATE_CATALOG if t["key"] == key), None)
 
 
-# Software profiles = Ansible roles in infra/ansible/roles. A fixed catalog:
-# neither users nor the AI can run arbitrary commands through the console.
-PROFILE_CATALOG = [
-    {"key": "docker", "label": "Docker", "os_family": "linux", "port": None,
-     "description": "Docker Engine + Compose, ops user in the docker group"},
-    {"key": "nginx", "label": "Nginx web server", "os_family": "linux", "port": 80,
-     "description": "Nginx with a landing page on port 80"},
-    {"key": "postgresql", "label": "PostgreSQL", "os_family": "linux", "port": None,
-     "description": "PostgreSQL server, listening on localhost"},
-    {"key": "node_exporter", "label": "Monitoring agent", "os_family": "linux", "port": 9100,
-     "description": "Prometheus node exporter on port 9100"},
-    {"key": "iis", "label": "IIS web server", "os_family": "windows", "port": 80,
-     "description": "Internet Information Services with a landing page, firewall open on 80"},
-    {"key": "windows_tools", "label": "Admin tools", "os_family": "windows", "port": None,
-     "description": "7-Zip, Git and Notepad++ via Chocolatey"},
-]
-PROFILES = {p["key"]: p for p in PROFILE_CATALOG}
+# Software profiles are discovered at runtime from Ansible roles: services/profile_service.py
 
 NAME_PATTERN = r"^[a-z][a-z0-9-]{1,40}[a-z0-9]$"

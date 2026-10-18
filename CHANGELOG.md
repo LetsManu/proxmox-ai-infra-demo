@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 – 2026-10-18
+
+Software is per project instead of a fixed list.
+
+- Profiles are discovered at runtime from Ansible roles with a `profile.yml`: built-in roles plus project folders (`EXTRA_PROFILE_DIRS`, default `./profiles` mounted read-only). New folders appear after *Refresh*, without a rebuild. Example project profile: `redis`.
+- Free-form **Extra packages** per VM: apt names for Linux, Chocolatey IDs for Windows, installed by `packages_linux` / `packages_windows`. Names are validated, installed only through the package manager, `PACKAGE_DENYLIST` applies.
+- AI drafts use the live catalog and can add packages (skipping software a profile already covers).
+
 ## 1.2.0 – 2026-10-18
 
 The console now creates everything it needs and configures the VMs it deploys.

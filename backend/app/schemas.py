@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .config import ENVIRONMENTS, NAME_PATTERN, PROFILES, TEMPLATE_CATALOG, normalize_env, template_entry
+from .config import ENVIRONMENTS, NAME_PATTERN, TEMPLATE_CATALOG, get_settings, normalize_env, template_entry
 
 TEMPLATE_KEYS = {t["key"] for t in TEMPLATE_CATALOG}
 NETWORKS = {"test": "test", "prod": "prod"}
@@ -48,7 +48,8 @@ class VmSpec(BaseModel):
     description: str = Field(default="", max_length=500)
     ssh_public_key: str = Field(default="", max_length=4096)
     cloud_init: CloudInit = Field(default_factory=CloudInit)
-    profiles: list[str] = Field(default_factory=list, max_length=10)
+    profiles: list[str] = Field(default_factory=list, max_length=20)
+    packages: list[str] = Field(default_factory=list, max_length=40)  # apt (Linux) / Chocolatey (Windows)
     tags: list[str] = Field(default_factory=list, max_length=10)
 
     @property
@@ -105,15 +106,20 @@ class VmSpec(BaseModel):
                 f"Network '{self.network}' is not allowed in {policy.label}; "
                 f"use '{NETWORKS[self.environment]}'"
             )
+        from .services.profile_service import get_profiles, package_errors
+
+        settings = get_settings()
+        catalog = get_profiles(settings)
         os_family = self.os_family
         for p in self.profiles:
-            prof = PROFILES.get(p)
+            prof = catalog.get(p)
             if not prof:
-                errors.append(f"Unknown software profile '{p}'. Allowed: {sorted(PROFILES)}")
+                errors.append(f"Unknown software profile '{p}'. Available: {sorted(catalog)}")
             elif prof["os_family"] != os_family:
                 errors.append(f"Profile '{p}' is for {prof['os_family']}, but {self.template} is {os_family}")
         if len(set(self.profiles)) != len(self.profiles):
             errors.append("Profiles must not repeat")
+        errors += package_errors(settings, os_family, self.packages)
         if os_family == "windows":
             if len(self.name) > 15:
                 errors.append("Windows computer names are limited to 15 characters")

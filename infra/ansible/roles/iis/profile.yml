@@ -1,0 +1,4 @@
+label: IIS web server
+os_family: windows
+description: Internet Information Services with a landing page, firewall open on 80
+port: 80

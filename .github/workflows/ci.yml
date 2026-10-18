@@ -59,8 +59,9 @@ jobs:
       - name: Playbook syntax (all profiles)
         run: |
           echo '{"linux":{"hosts":{"l":{}}},"windows":{"hosts":{"w":{}}}}' > /tmp/inv.json
-          ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i /tmp/inv.json site.yml --syntax-check \
-            -e '{"profiles":["docker","nginx","postgresql","node_exporter","iis","windows_tools"]}'
+          ANSIBLE_CONFIG=ansible.cfg ANSIBLE_ROLES_PATH="$PWD/roles:$GITHUB_WORKSPACE/profiles" \
+            ansible-playbook -i /tmp/inv.json site.yml --syntax-check \
+            -e '{"profiles":["docker","nginx","postgresql","node_exporter","iis","windows_tools","redis"],"packages":["git"]}'
 
   # A fresh clone needs no .env (mock mode); an existing setup keeps working with its .env.
   compose:

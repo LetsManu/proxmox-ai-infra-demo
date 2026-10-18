@@ -15,7 +15,8 @@ import subprocess
 import time
 from typing import Callable
 
-from ..config import PROFILES, Settings
+from ..config import Settings
+from .profile_service import get_profiles, roles_path
 from .proxmox_service import MockProxmox, get_proxmox
 
 Log = Callable[[str], None]
@@ -56,11 +57,14 @@ def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = N
 
 
 def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family: str, profiles: list[str],
-                 job_id: str, log: Log) -> dict:
-    labels = ", ".join(PROFILES[p]["label"] for p in profiles) or "base only"
-    log(f"Configuring {name} ({os_family}) with Ansible: {labels}")
+                 job_id: str, log: Log, packages: list[str] | None = None) -> dict:
+    packages = packages or []
+    catalog = get_profiles(settings)
+    labels = ", ".join(catalog.get(p, {}).get("label", p) for p in profiles) or "base only"
+    log(f"Configuring {name} ({os_family}) with Ansible: {labels}"
+        + (f"; packages: {', '.join(packages)}" if packages else ""))
     if not settings.live_mode:
-        return _mock_run(settings, name, os_family, profiles, log)
+        return _mock_run(settings, name, os_family, profiles, log, packages)
 
     if os_family == "windows" and not settings.windows_admin_password.get_secret_value():
         raise ConfigSkipped("WINDOWS_ADMIN_PASSWORD is not set; skipping configuration")
@@ -85,11 +89,12 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
     with open(inv_path, "w") as fh:
         json.dump(inventory, fh)
     with open(vars_path, "w") as fh:
-        json.dump({"profiles": profiles}, fh)
+        json.dump({"profiles": profiles, "packages": packages}, fh)
 
     env_vars = dict(os.environ)
     env_vars.update({
         "ANSIBLE_CONFIG": os.path.join(settings.ansible_dir, "ansible.cfg"),
+        "ANSIBLE_ROLES_PATH": roles_path(settings),
         "ANSIBLE_FORCE_COLOR": "0",
         "ANSIBLE_NOCOLOR": "1",
         "WINDOWS_ADMIN_PASSWORD": settings.windows_admin_password.get_secret_value(),
@@ -109,10 +114,11 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
     rc = proc.wait()
     if rc != 0:
         raise RuntimeError(f"ansible-playbook failed with exit code {rc}")
-    return {"profiles": profiles}
+    return {"profiles": profiles, "packages": packages}
 
 
-def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str], log: Log) -> dict:
+def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str], log: Log,
+              packages: list[str]) -> dict:
     delay = 0.12 / max(settings.mock_speed, 0.01)
     base = {
         "linux": ["Wait until the VM accepts SSH", "Wait for cloud-init to finish", "Install base packages",
@@ -131,7 +137,10 @@ def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str]
     log("")
     log(f"PLAY [Configure {'Linux' if os_family == 'linux' else 'Windows'} VMs] " + "*" * 40)
     changed = ok = 0
-    for task in base + [t for p in profiles for t in per_profile.get(p, [])]:
+    tasks = base + [t for p in profiles for t in per_profile.get(p, [f"{p} : main"])]
+    if packages:
+        tasks.append(f"Install extra packages ({', '.join(packages)})")
+    for task in tasks:
         time.sleep(delay)
         log(f"TASK [{task}] " + "*" * max(4, 50 - len(task)))
         status = "ok" if task.startswith("Wait") else "changed"
@@ -141,4 +150,4 @@ def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str]
     log("")
     log("PLAY RECAP " + "*" * 50)
     log(f"{name:<24} : ok={ok}    changed={changed}    unreachable=0    failed=0    skipped=0")
-    return {"profiles": profiles}
+    return {"profiles": profiles, "packages": packages}

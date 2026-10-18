@@ -24,9 +24,11 @@ services:
       DATABASE_URL: sqlite:////data/app.db
       WORKSPACE_DIR: /workspace
       INFRA_DIR: /app/infra
+      EXTRA_PROFILE_DIRS: ${EXTRA_PROFILE_DIRS:-/profiles}
     volumes:
       - app-data:/data          # SQLite deployment history
       - tf-workspace:/workspace # separate TEST/PROD Terraform state + plans
+      - ${PROFILES_DIR:-./profiles}:/profiles:ro # project software profiles (Ansible roles), re-read live
     ports:
       # Bound to localhost only; the browser talks to the API through the frontend proxy.
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"

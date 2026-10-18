@@ -80,7 +80,13 @@ Click **Use this spec**.
 
 Click **Generate Plan**.
 
-After *Use this spec*, show the **Software** section: Docker and Nginx ticked. Optional: switch OS to *Windows Server 2022* to show IIS / admin tools, then switch back.
+After *Use this spec*, show the **Software** section: Docker and Nginx ticked. Type `git jq` into **Extra packages** and press Enter.
+
+> "Software differs per project. Profiles are just Ansible role folders: a project drops its own roles into its
+> profiles folder and they appear here (note *Redis – Project*). For one-off tools I type package names; they go
+> through apt or Chocolatey, never as shell commands."
+
+Optional: switch OS to *Windows Server 2022* to show IIS / admin tools and Chocolatey package IDs, then switch back.
 
 **Expected:** Plan card `1 to add · 0 to change · 0 to destroy`, a green *Create* row, VMID in 900–999, template 9000; the raw OpenTofu output under *OpenTofu output*. **Plan review** card: *Low risk*, a plain-language summary, a tickable *Before you continue* checklist, and the note that production changes always need a person.
 

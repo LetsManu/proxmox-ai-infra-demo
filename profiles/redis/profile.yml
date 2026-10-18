@@ -1,0 +1,4 @@
+label: Redis
+os_family: linux
+description: Redis server, listening on localhost (example project profile)
+port: 6379

@@ -41,6 +41,7 @@ const form = reactive({
   ssh_public_key: '',
   cloud_init: { packages: ['qemu-guest-agent'], commands: [] },
   profiles: [],
+  packages: [],
 })
 
 const planJob = ref(null)
@@ -205,6 +206,15 @@ async function platformApply() {
     toast.success(plan.summary, { title: 'Platform built' })
   } else if (job) toast.error(job.error || 'Apply failed', { title: 'Platform build failed' })
   await refreshPlatform()
+}
+
+async function reloadProfiles() {
+  try {
+    profiles.value = await api.profiles()
+    toast.info(`${profiles.value.length} software profiles available.`, { title: 'Catalog reloaded' })
+  } catch (e) {
+    toast.error(e.message)
+  }
 }
 
 async function configureVm() {
@@ -390,6 +400,7 @@ function applyGeneratedSpec(s) {
     description: s.description || '',
     cloud_init: s.cloud_init,
     profiles: s.profiles || [],
+    packages: s.packages || [],
   })
   toast.info('Review the values, then generate a plan.', { title: 'Draft applied' })
 }
@@ -407,6 +418,7 @@ function selectVm(vm) {
     ssh_public_key: vm.spec.ssh_public_key || '',
     cloud_init: vm.spec.cloud_init || { packages: [], commands: [] },
     profiles: vm.spec.profiles || [],
+    packages: vm.spec.packages || [],
   })
   treeOpen.value = false
   window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -446,7 +458,7 @@ onUnmounted(() => clearInterval(timer))
     <div class="brand">
       <span class="logo" aria-hidden="true"><Layers :size="17" /></span>
       <span class="name">Infra Console</span>
-      <span class="version">1.2.0</span>
+      <span class="version">1.3.0</span>
     </div>
     <div class="bar-right">
       <template v-if="health">
@@ -527,6 +539,7 @@ onUnmounted(() => clearInterval(timer))
             :policy="policy"
             :templates="templates"
             :profiles="profiles"
+            @reload-profiles="reloadProfiles"
             :environments="environments"
             @apply-spec="applyGeneratedSpec"
           />

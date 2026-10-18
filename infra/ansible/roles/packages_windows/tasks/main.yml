@@ -1,0 +1,5 @@
+# Free-form per-VM packages, installed only through Chocolatey (no shell commands).
+- name: Install extra packages ({{ packages | join(', ') }})
+  chocolatey.chocolatey.win_chocolatey:
+    name: "{{ packages }}"
+    state: present

@@ -1,0 +1,3 @@
+label: Docker
+os_family: linux
+description: Docker Engine + Compose, ops user in the docker group

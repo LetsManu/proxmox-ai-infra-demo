@@ -44,7 +44,7 @@ Guardrails applied to every AI answer:
 | Template | Must be a configured key (`ubuntu-24-04`, `debian-12`), else **rejected**. |
 | Size | Must fit TEST limits (4 vCPU / 8 GB / 64 GB), else **rejected** with the exact limit. |
 | cloud-init commands | Single line, < 300 chars, no `rm -rf /`, `mkfs`, `dd if=`, `curl … \| sh`, fork bombs, reboot/shutdown: else **rejected**. |
-| Software | Only profiles from the catalog, matching the template's OS family (`docker` on Windows is rejected). |
+| Software | Profiles only from the live, discovered catalog, matching the template's OS family (`docker` on Windows is rejected). Other software goes into `packages`: valid apt / Chocolatey names only, denylist applied. |
 | Packages | Linux only, valid package names; `qemu-guest-agent` is added if missing. Windows drafts get none. |
 | Name | Normalised to lowercase, `-test` suffix. |
 | Secrets | The prompt never contains secrets; the AI is told never to invent keys; SSH keys are not part of AI output. |

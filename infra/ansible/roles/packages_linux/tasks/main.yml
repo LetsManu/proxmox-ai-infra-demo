@@ -1,0 +1,7 @@
+# Free-form per-VM packages, installed only through apt (no shell commands).
+- name: Install extra packages ({{ packages | join(', ') }})
+  ansible.builtin.apt:
+    name: "{{ packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600

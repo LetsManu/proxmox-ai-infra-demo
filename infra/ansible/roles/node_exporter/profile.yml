@@ -1,0 +1,4 @@
+label: Monitoring agent
+os_family: linux
+description: Prometheus node exporter on port 9100
+port: 9100

@@ -91,7 +91,7 @@ More detail: [docs/architecture.md](docs/architecture.md).
 - **Recreate**: destroy and clone again from the template (cloud-init reruns). In production this also requires typed approval (`RECREATE`).
 - **History**: every plan, deploy, validation and approval with user and plan summary.
 - **Platform**: shows every resource the console depends on (networks, storage, pool, templates) and who creates it; *Prepare Platform* plans and *Build templates* applies the platform stack.
-- **Software**: tick profiles in the form (or let the AI pick them); Ansible installs them after deploy, recreate and promotion; *Configure* re-runs it; validation checks it.
+- **Software per project**: profiles are discovered from Ansible role folders (built-in plus a project `profiles/` folder, re-read live), plus free-form apt/Chocolatey packages per VM. Ansible installs them after deploy, recreate and promotion; *Configure* re-runs it; validation checks it. See [docs/configuration.md](docs/configuration.md).
 - **Windows Server 2022** alongside Ubuntu 24.04 and Debian 12 (Windows template provided once, see [docs/windows-template.md](docs/windows-template.md)).
 
 ## Prerequisites
@@ -205,6 +205,7 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | `TEMPLATE_WINDOWS_2022_ID` | `9002` | Windows template (provided once) |
 | `POOL_ID`, `IMAGE_STORAGE`, `SNIPPETS_DATASTORE` | –, `local`, – | From the bootstrap output |
 | `ANSIBLE_SSH_KEY_FILE`, `WINDOWS_ADMIN_PASSWORD` | – | Software configuration (prefer Docker secrets) |
+| `PROFILES_DIR`, `EXTRA_PROFILE_DIRS`, `PACKAGE_DENYLIST` | `./profiles`, `/profiles`, – | Project software profiles and package policy |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_MAX_TOKENS` | `none`, –, `claude-opus-5-5`, `4000` | AI assistance |
 | `FRONTEND_PORT`, `BACKEND_PORT` | `8080`, `8000` | Published ports |
 
@@ -220,7 +221,7 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | POST | `/api/vms/recreate` | TEST direct, PROD with approval |
 | POST | `/api/vms/configure` | Re-run Ansible for a TEST VM (job) |
 | POST | `/api/vms/power` | Start/stop (TEST only) |
-| GET | `/api/platform`, `/api/profiles` | Platform resource status; software profile catalog |
+| GET | `/api/platform`, `/api/profiles` | Platform resource status; discovered software profiles (re-read per call) |
 | POST | `/api/platform/plan`, `/api/platform/apply` | Plan / apply the platform stack (jobs) |
 | POST | `/api/ai/generate-vm-spec`, `/api/ai/summarize-plan`, `/api/ai/troubleshoot` | AI (advisory) |
 

@@ -32,8 +32,8 @@ def validate(req: ValidateRequest):
                              health_check_path=req.health_check_path, simulate_failure=req.simulate_failure,
                              log=ctx.log, os_family=os_family)
         current = get_vm(req.name, req.environment)
-        result = finish(result, config_status=current.config_status, profiles=vm.spec.get("profiles") or [],
-                        log=ctx.log)
+        result = finish(result, config_status=current.config_status,
+                        profiles=(vm.spec.get("profiles") or []) + (vm.spec.get("packages") or []), log=ctx.log)
         ctx.update_result(validation=result, summary=f"Validation {result['overall']}")
         with session_scope() as db:
             row = db.query(VirtualMachine).filter_by(name=req.name, environment=req.environment).one()

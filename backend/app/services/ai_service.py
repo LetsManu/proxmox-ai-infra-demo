@@ -18,7 +18,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..config import ENVIRONMENTS, PROFILE_CATALOG, TEMPLATE_CATALOG, Settings, template_entry
+from ..config import ENVIRONMENTS, TEMPLATE_CATALOG, Settings, template_entry
+from .profile_service import load_profiles
 from ..schemas import VmSpec
 
 HUMAN_APPROVAL_NOTE = ("A human must review and explicitly approve every production change. "
@@ -211,6 +212,14 @@ def summarize_plan(settings: Settings, plan_text: str, env: str) -> dict:
 # VM spec generation
 # ---------------------------------------------------------------------------
 
+def _spec_schema(settings: Settings) -> dict:
+    """JSON schema for drafts; the profile enum is the live, discovered catalog."""
+    schema = json.loads(json.dumps(SPEC_SCHEMA))
+    keys = [p["key"] for p in load_profiles(settings)]
+    schema["properties"]["profiles"]["items"] = {"type": "string", "enum": keys} if keys else {"type": "string"}
+    return schema
+
+
 SPEC_SCHEMA = {
     "type": "object",
     "properties": {
@@ -231,32 +240,33 @@ SPEC_SCHEMA = {
             "required": ["packages", "commands"],
             "additionalProperties": False,
         },
-        "profiles": {"type": "array", "items": {"type": "string", "enum": [p["key"] for p in PROFILE_CATALOG]}},
+        "profiles": {"type": "array", "items": {"type": "string"}},
+        "packages": {"type": "array", "items": {"type": "string"}},
         "warnings": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["name", "environment", "template", "cores", "memory_mb", "disk_gb", "network",
-                 "description", "cloud_init", "profiles", "warnings"],
+                 "description", "cloud_init", "profiles", "packages", "warnings"],
     "additionalProperties": False,
 }
 
 
-def _spec_system() -> str:
+def _spec_system(settings: Settings) -> str:
     t = ENVIRONMENTS["test"]
     templates = ", ".join(f"{x['key']} ({x['label']}, {x['os_family']})" for x in TEMPLATE_CATALOG)
-    profiles = "; ".join(f"{p['key']} ({p['os_family']}): {p['description']}" for p in PROFILE_CATALOG)
+    profiles = "; ".join(f"{p['key']} ({p['os_family']}): {p['description']}" for p in load_profiles(settings))
     return f"""You convert a natural-language VM request into a JSON VM definition for a Proxmox platform.
 Allowed templates: {templates}. Name: lowercase letters, digits and hyphens, 3-42 chars (Windows: max 15),
 ends with "-test" for test VMs. environment is "test" unless the user explicitly asks for production.
 network must equal the environment ("test" or "prod"). TEST limits: max {t.max_cores} vCPU,
 {t.max_memory_mb} MB RAM, {t.max_disk_gb} GB disk.
-Software is installed by choosing profiles ONLY from this catalog, matching the template's OS family: {profiles}.
-Prefer profiles over packages. For Linux, packages are extra Debian/Ubuntu package names and must include
-"qemu-guest-agent"; commands must be single-line, idempotent shell commands. For Windows, packages and
-commands must be empty. If the request needs software that no profile covers, say so in warnings.
+Software: first choose profiles ONLY from this catalog, matching the template's OS family: {profiles}.
+For software no profile covers, add exact package names to "packages": Debian/Ubuntu apt names for Linux
+(e.g. redis-server, git), Chocolatey package IDs for Windows (e.g. googlechrome, vscode). Only real package
+names, no commands, no URLs. Leave cloud_init.packages and cloud_init.commands empty.
 Report anything you changed or could not satisfy in warnings. Never invent secrets or SSH keys."""
 
 
-def _local_spec(prompt: str) -> dict:
+def _local_spec(settings: Settings, prompt: str) -> dict:
     text = prompt.lower()
 
     def num(pattern: str, default: int) -> int:
@@ -274,16 +284,29 @@ def _local_spec(prompt: str) -> dict:
     rules = ([(r"\b(iis|web)", "iis"), (r"\b(tools|git|7-?zip|chocolatey)", "windows_tools")] if windows else
              [(r"\bdocker", "docker"), (r"\b(nginx|web)", "nginx"), (r"\b(postgres|database)", "postgresql"),
               (r"\b(monitor|prometheus|metrics)", "node_exporter")])
+    catalog = {p["key"]: p for p in load_profiles(settings)}
+    family = "windows" if windows else "linux"
     for pattern, profile in rules:
-        if re.search(pattern, text) and profile not in profiles:
+        if re.search(pattern, text) and profile not in profiles and profile in catalog:
             profiles.append(profile)
-    if not windows:
-        packages += [p for w, p in (("git", "git"), ("htop", "htop")) if re.search(rf"\b{w}\b", text)]
+    # Discovered project profiles: match their key or label
+    for key, p in catalog.items():
+        if p["os_family"] == family and key not in profiles and (
+                re.search(rf"\b{re.escape(key.replace('_', ' '))}\b", text)
+                or re.search(rf"\b{re.escape(p['label'].lower())}\b", text)):
+            profiles.append(key)
+    known = ({"git": "git", "7zip": "7zip", "vscode": "vscode", "chrome": "googlechrome", "firefox": "firefox"} if windows
+             else {"git": "git", "htop": "htop", "redis": "redis-server", "curl": "curl", "jq": "jq", "vim": "vim"})
+    covered = " ".join(f"{k} {catalog[k]['label'].lower()}" for k in profiles if k in catalog)
+    extra = [pkg for word, pkg in known.items()
+             if re.search(rf"\b{word}\b", text) and not re.search(rf"\b{word}\b", covered)]
+    if windows and "windows_tools" in profiles:
+        extra = [x for x in extra if x not in ("git", "7zip")]
     purpose = "web" if re.search(r"\bweb|\biis", text) else "db" if "database" in text or "postgres" in text else "app"
     name = f"win-{purpose}-test" if windows else f"demo-{purpose}-test"
     return {"name": name, "environment": env, "template": template, "cores": cores,
             "memory_mb": mem_gb * 1024, "disk_gb": max(disk, 40) if windows else disk, "network": "test",
-            "description": prompt.strip()[:200], "profiles": profiles,
+            "description": prompt.strip()[:200], "profiles": profiles, "packages": extra,
             "cloud_init": {"packages": packages, "commands": []}, "warnings": []}
 
 
@@ -311,6 +334,7 @@ def validate_generated_spec(raw: dict) -> dict:
         warnings.append("Added qemu-guest-agent (required for IP reporting and validation).")
     raw["cloud_init"] = ci
     raw["profiles"] = list(dict.fromkeys(raw.get("profiles") or []))
+    raw["packages"] = list(dict.fromkeys(raw.get("packages") or []))
     policy = ENVIRONMENTS["test"]
     for key, limit, unit in (("cores", policy.max_cores, "vCPU"), ("memory_mb", policy.max_memory_mb, "MB RAM"),
                              ("disk_gb", policy.max_disk_gb, "GB disk")):
@@ -337,8 +361,8 @@ def validate_generated_spec(raw: dict) -> dict:
 def generate_vm_spec(settings: Settings, prompt: str) -> dict:
     out = _with_fallback(
         settings,
-        lambda: validate_generated_spec(_call_claude(settings, _spec_system(), prompt, SPEC_SCHEMA)),
-        lambda: validate_generated_spec(_local_spec(prompt)),
+        lambda: validate_generated_spec(_call_claude(settings, _spec_system(settings), prompt, _spec_schema(settings))),
+        lambda: validate_generated_spec(_local_spec(settings, prompt)),
     )
     out["note"] = "Generated spec is a draft. Review it, then Generate Plan. Nothing is deployed automatically."
     return out

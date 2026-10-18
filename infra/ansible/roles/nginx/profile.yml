@@ -1,0 +1,4 @@
+label: Nginx web server
+os_family: linux
+description: Nginx with a landing page on port 80
+port: 80

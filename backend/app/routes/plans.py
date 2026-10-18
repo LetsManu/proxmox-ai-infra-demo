@@ -124,7 +124,8 @@ def configure(ctx: JobContext, settings: Settings, env: str, name: str) -> str:
     try:
         ip = config_service.wait_for_ip(settings, vm.vmid, ctx.log)
         config_service.configure_vm(settings, name=name, env=env, ip=ip, os_family=os_family,
-                                    profiles=profiles, job_id=ctx.job_id, log=ctx.log)
+                                    profiles=profiles, packages=vm.spec.get("packages") or [],
+                                    job_id=ctx.job_id, log=ctx.log)
         ctx.log(f"Configuration of {name} complete.")
     except config_service.ConfigSkipped as exc:
         status = "skipped"
