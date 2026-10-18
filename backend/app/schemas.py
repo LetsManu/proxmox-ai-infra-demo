@@ -185,6 +185,12 @@ class VmSpec(BaseModel):
             # cloud-init packages and SSH keys do not apply to Windows; software comes from profiles
             self.cloud_init = CloudInit()
             self.ssh_public_key = ""
+        if self.environment == "test" and not self.stack and self.name.endswith("-test"):
+            import re
+
+            base = self.name.removesuffix("-test")
+            if not re.fullmatch(NAME_PATTERN, base):
+                errors.append(f"The production name '{base}' would be invalid; use at least 3 characters before -test")
         if self.kind == "lxc" and self.template not in CT_KEYS:
             errors.append(f"Containers use an LXC template: {sorted(CT_KEYS)}")
         if self.kind == "vm" and self.template in CT_KEYS:

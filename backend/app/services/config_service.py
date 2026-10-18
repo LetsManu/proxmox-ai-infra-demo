@@ -123,7 +123,8 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
     log("$ " + " ".join(cmd))
     secret = settings.windows_admin_password.get_secret_value()
     proc = subprocess.Popen(cmd, cwd=settings.ansible_dir, env=env_vars, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+                            stderr=subprocess.STDOUT, text=True, bufsize=1,
+                            stdin=subprocess.DEVNULL)
     assert proc.stdout is not None
     for line in proc.stdout:
         line = line.rstrip("\n")

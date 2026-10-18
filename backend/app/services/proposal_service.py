@@ -124,7 +124,8 @@ def _syntax_check(name: str, os_family: str, tasks_yaml: str, handlers_yaml: str
         env = dict(os.environ, ANSIBLE_ROLES_PATH=os.path.join(d, "roles"), ANSIBLE_LOCAL_TEMP=os.path.join(d, "tmp"),
                    ANSIBLE_HOME=os.path.join(d, "home"))
         r = subprocess.run(["ansible-playbook", "-i", "inv.ini", "play.yml", "--syntax-check"], cwd=d, env=env,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
         out = (r.stderr or r.stdout).strip().splitlines()
         return r.returncode == 0, "" if r.returncode == 0 else (out[-1] if out else "syntax error")
 

@@ -199,6 +199,24 @@ def create_plan(req: PlanRequest):
     return JobCreated(job_id=job_id, status="queued")
 
 
+@router.get("/jobs", response_model=list[JobOut])
+def list_jobs(status: str | None = Query(None, pattern="^(queued|running|success|failed|awaiting_approval)$"),
+              limit: int = Query(20, ge=1, le=200), vm_name: str | None = None, environment: str | None = None,
+              action: str | None = None):
+    """Recent jobs (dashboard: in progress, awaiting approval; detail pages: last validation). Logs are omitted."""
+    with session_scope() as db:
+        q = db.query(Job)
+        for col, val in (("status", status), ("vm_name", vm_name), ("environment", environment), ("action", action)):
+            if val:
+                q = q.filter_by(**{col: val})
+        rows = q.order_by(Job.created_at.desc()).limit(limit).all()
+        for r in rows:
+            db.expunge(r)
+    for r in rows:
+        r.logs = ""
+    return rows
+
+
 @router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: str):
     return plan_job_or_404(job_id)

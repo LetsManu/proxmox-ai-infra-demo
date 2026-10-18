@@ -225,7 +225,8 @@ def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_fa
         json.dump({"checks": inside}, fh)
     cmd = ["ansible-playbook", "-i", inv_path, "-e", f"@{vars_path}", os.path.join(settings.ansible_dir, "tests.yml")]
     log("$ " + " ".join(cmd))
-    proc = subprocess.run(cmd, cwd=settings.ansible_dir, env=env_vars, capture_output=True, text=True, timeout=900)
+    proc = subprocess.run(cmd, cwd=settings.ansible_dir, env=env_vars, capture_output=True, text=True, timeout=900,
+                          stdin=subprocess.DEVNULL)
     found: dict[str, tuple[bool, str]] = {}
     for m in re.finditer(r"CHECK\|([0-9a-f]{8})\|(PASS|FAIL)\|([^\"\n]*)", proc.stdout):
         found[m.group(1)] = (m.group(2) == "PASS", m.group(3).strip())

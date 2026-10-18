@@ -1,162 +1,120 @@
 # Live demo script (10–15 minutes)
 
-**Setup the night before:** follow the [checklist](#pre-demo-checklist) at the bottom. Have two browser tabs: the console and the Proxmox UI (if live).
+**Setup the night before:** follow the [checklist](#pre-demo-checklist) at the bottom. Two browser tabs: the console and the Proxmox UI (if live).
 
 | Time | Section |
 |---|---|
 | 0:00 | Opening and problem |
-| 1:30 | Architecture in one slide |
-| 2:30 | Platform: the console builds its own templates |
-| 3:00 | AI drafts a VM |
-| 4:30 | Plan + AI review |
-| 6:00 | Deploy to TEST |
-| 7:00 | Validation fails → AI troubleshooting → recreate |
-| 9:30 | Validation passes |
-| 10:00 | Production promotion with human approval |
-| 12:30 | Security model + closing |
+| 1:00 | Dashboard and architecture |
+| 2:00 | Platform: the console builds its own templates |
+| 3:00 | Create VM: the assistant picks the software (AI moment 1) |
+| 5:00 | Plan in plain language + risk (AI moment 2) |
+| 6:00 | Deploy to Test |
+| 7:00 | Validation fails → diagnosis (AI moment 3) → passes |
+| 8:30 | AI-drafted tests and roles in the review queue |
+| 10:00 | Production with human approval |
+| 11:30 | Stack: WordPress + monitoring as VM, container and Docker services |
+| 13:30 | Security model and closing |
 
 ---
 
 ## 0:00 Opening
 
-> "Every team that runs Proxmox knows this request: *'Can I get a VM?'* Today that's a ticket, a few clicks in the Proxmox UI, a copied template, and nobody really knows whether production looks like test.
+> "Every team that runs Proxmox knows this request: *'Can I get a server for X?'* Today that's a ticket, clicks in the Proxmox UI, a copied template, some software installed by hand, and nobody knows whether production looks like test.
 >
-> I'll show you a small platform that turns that request into a **reviewed, validated and approved change**: Infrastructure as Code underneath, AI to help, and humans in charge of production."
+> I'll show you a console that turns that request into a **reviewed, tested and approved change**: Infrastructure as Code underneath, AI to help, and people in charge of production."
 
-## Problem it solves
+## 1:00 Dashboard and architecture
 
-> "Three problems:
-> 1. **Manual clicks don't scale and aren't reviewable.** We use OpenTofu, so every change is a plan you can read before it happens.
-> 2. **Test and production drift.** Production VMs here are promoted from a TEST VM that passed validation, with the same spec.
-> 3. **Operators need help, not autopilot.** AI writes drafts and explains plans. It cannot deploy or approve anything."
+Open `http://localhost:8080`. It looks like Proxmox on purpose: navigation and resource tree on the left, Test and Production machines in the tree.
 
-## 1:30 Architecture
+> "Four numbers: what runs, what's being deployed, the last validation, and what waits for a person. One blue button: Create VM."
 
-Show the Mermaid diagram in README.md (or the [architecture doc](docs/architecture.md)).
+Optional: show the README architecture diagram. *"The browser only talks to our backend. Only the backend holds a least-privilege Proxmox API token. OpenTofu with separate state for Test and Production, Ansible for software, Claude optional."*
 
-> "The browser only talks to our backend. The backend alone holds a **least-privilege Proxmox API token**: not root, not a password. It runs OpenTofu with separate state for TEST and PRODUCTION. Claude is optional; without it, a local rule engine produces the same structure."
+Optional: moon icon top right switches to the dark theme.
 
-## Start (if not already running)
+## 2:00 Platform
 
-```bash
-cd proxmox-ai-infra-demo
-docker compose up -d
-docker compose ps          # both services "healthy"
-```
+The amber banner says the platform is not ready. Click **Open Platform**.
 
-Open `http://localhost:8080`. It looks like the Proxmox UI on purpose: resource tree on the left (Datacenter › node › Test / Production › VMs, templates, storage), actions top right. Point at the top bar and the progress bar:
+> "The console lists everything it depends on and who creates it: networks, storage and pool came from a one-time admin bootstrap; templates are created by the console itself."
 
-> "Top right: mode (Live or Mock), the Proxmox version and node, OpenTofu, which assistant (Claude or local rules), running tasks, and who I am for the audit trail. The progress bar tracks this VM from definition to production; the blue button is always the next step."
+Click **Check what is missing**. **Expected:** *Plan: 6 to add*: two cloud images, two VM templates, two LXC templates, risk *Low*. Click **Prepare platform** → dialog lists exactly what will happen → **Prepare platform**. Toast *Platform ready*; all resources *Present*.
 
-## 2:30 Platform (the tool creates what it needs)
+## 3:00 Create VM (AI moment 1)
 
-Point at the **Platform** card (step 1 in the progress bar): networks, storage and pool are *Present* (created once
-by the admin bootstrap), the Ubuntu and Debian templates are *Missing*, Windows is *Provided once*. Generate Plan is
-disabled.
+Click **Create VM**. Type: *A WordPress site for the marketing team*. Click **Draft with assistant**.
 
-Click **Prepare Platform**. **Expected:** platform plan `4 to add`: two `proxmox_download_file` (official cloud
-images) and two templates. Click **Build templates**. **Expected:** toast *Platform built*, the card turns *Ready*,
-the templates appear in the resource tree.
+**Basics** opens with name, Ubuntu, 2 vCPU / 4 GB / 32 GB. Change the name to `wpsite-test`.
 
-> "The console provisions its own prerequisites as code: it downloads the official cloud images and turns them
-> into templates. What it is *not* allowed to create, users, permissions, networks, came from a one-time
-> bootstrap that an admin runs with admin rights. The console itself never has them."
+> "Only what matters is visible. Description and SSH key are under Advanced options. Limits are shown next to each field and checked again on the server."
 
-## 3:00 AI drafts a VM (AI moment 1)
+Click **Continue**. **Software** shows *Recommended for your request*:
 
-The prompt box is pre-filled: *"Create a small Ubuntu test server for a web app with 2 CPUs, 4 GB RAM, 40 GB disk, and Docker installed."* Open **Draft from a description** (open by default) and click **Draft spec**.
+> "The assistant listed what WordPress **needs**, split into required and optional, and matched each need: Nginx is an existing profile, PHP and MariaDB are packages it **looked up in the real Ubuntu repository**, WordPress itself has no profile, so it **drafted an Ansible role**, which waits for review and can't be used yet. Backups, monitoring and fail2ban are optional: I decide."
 
-**Expected:** a draft card: name `demo-web-test`, Ubuntu 24.04, 2 vCPU · 4 GB · 40 GB, software *Docker, Nginx web server*.
+Tick *Monitoring* if you like. Click **Continue**.
 
-> "The AI chose software from our catalog of Ansible profiles. It cannot invent commands: the catalog is the whole menu."
+## 5:00 Plan (AI moment 2)
 
-> "The AI produces structured JSON, and then **our code validates it**: known template, within TEST limits, safe commands. It's a draft: nothing happened yet."
+Click **Create plan**. **Expected:** *Plan: 1 to add* in a sentence, one green *Create VM* row, risk badge *Low risk*. Click **Why?** for the explanation and the pre-flight checks. Click **View full plan** → the raw OpenTofu output in a side panel (copyable), Esc closes it.
 
-Optional quick win: replace the prompt with *"production database with 64 cpus and 512 GB RAM"* → **Draft rejected** with the exact limits. Then restore the original prompt (or just keep the first draft).
+> "This is a real OpenTofu plan. The AI explains it and rates the risk, but our parser computes risk too: if anything is destroyed it's HIGH, and the AI can only raise risk, never lower it."
 
-Click **Use this spec**.
+## 6:00 Deploy to Test
 
-## 4:30 Plan + AI review (AI moment 2)
+Click **Deploy to Test**. The status card shows *Running*; **Show details** opens the live log (OpenTofu apply, then Ansible). The page switches to the machine when done.
 
-Click **Generate Plan**.
+> "It applies exactly the plan we reviewed. Then Ansible installs the software: Linux over SSH, Windows over WinRM."
 
-After *Use this spec*, show the **Software** section: Docker and Nginx ticked. Type `git jq` into **Extra packages** and press Enter.
+## 7:00 Validation fails, diagnosis, passes (AI moment 3)
 
-> "Software differs per project. Profiles are just Ansible role folders: a project drops its own roles into its
-> profiles folder and they appear here (note *Redis – Project*). For one-off tools I type package names; they go
-> through apt or Chocolatey, never as shell commands."
+Tick **Simulate a failure (demo mode)** (live: skip), click **Validate**.
 
-Optional: switch OS to *Windows Server 2022* to show IIS / admin tools and Chocolatey package IDs, then switch back.
+**Expected:** the checklist shows *First boot finished* and *Application tests* in red; Security baseline green. Progress step *Validated* is red.
 
-**Expected:** Plan card `1 to add · 0 to change · 0 to destroy`, a green *Create* row, VMID in 900–999, template 9000; the raw OpenTofu output under *OpenTofu output*. **Plan review** card: *Low risk*, a plain-language summary, a tickable *Before you continue* checklist, and the note that production changes always need a person.
+Click **Ask for a diagnosis** → side panel: likely cause, what to check, safe fix, *Recreating is safe*, *No data at risk*.
 
-> "This is a real OpenTofu plan. The AI translates it into plain English and rates the risk. Important detail: risk is computed **twice**. If the AI says 'low' but the plan destroys something, our parser overrides it to HIGH. The AI can raise risk, never lower it."
+> "Advice only. It also tells me whether recreating is safe or whether this machine may hold data."
 
-## 6:00 Deploy to TEST
+Untick the simulation, click **Validate** → *Passed*. Click **Show details (20 tests)**: security baseline (SSH keys only, no root login, automatic updates, no exposed database ports) and application tests, run on the machine and from the network.
 
-Click **Deploy to Test**. Scroll to the **Job log**.
+## 8:30 Review queue
 
-**Expected:** `Creating... Creation complete ... Apply complete!`, then Ansible: `PLAY [Configure Linux VMs]`, tasks like *Install Docker Engine and Compose*, *Install Nginx*, and `PLAY RECAP … failed=0`.
+In **Automated tests**, click **Draft tests with assistant** → toast *Tests drafted*, **Open review queue**.
 
-> "Deploy applies **exactly the plan we just reviewed**: the saved plan file. Then Ansible configures the VM: base hardening plus Docker and Nginx. Same flow for Windows over WinRM. TEST uses linked clones, so it's fast and disposable."
+> "Everything the AI writes waits here for a person: the WordPress role and the test suite. Both passed automated safety checks: only allowed Ansible modules, HTTPS downloads, no secrets, syntax check."
 
-(Live mode: switch to the Proxmox tab and show VM 9xx booting.)
+Click **Show details** on the role: YAML with highlighting. **Approve** the role, then the test suite (simple confirmation, your name is recorded).
 
-## 7:00 Failure → AI troubleshooting → recreate (AI moment 3)
+## 10:00 Production with human approval
 
-In **Validation**: tick **Simulate failure (mock)** (in live mode, skip this or use a VM on a VLAN without DNS). Click **Validate**.
+Back on `wpsite-test` (resource tree). Click **Validate** (now with the approved suite), then **Request production approval**.
 
-**Expected:** *VM is running* ✔, *Cloud-init finished* ✖, *Service responds* ✖, status **Failed**; the progress bar marks Validate red.
+**Expected:** a dialog *Deploy wpsite to Production?* with *What will happen* (create VM wpsite, ID 100, install software, record the decision), the plan's age, a checkbox and a typed word. **Approve and deploy** is disabled. Tick *"I understand this will affect the production environment."*, type `promote` (still disabled), then `PROMOTE`.
 
-Click **Diagnose**.
+> "Checkbox and typed word, and the API checks everything again: validation still valid, plan younger than an hour, not decided before. If I close this dialog the request waits in the review queue for someone else."
 
-**Expected (inside the Validation card):** likely cause = cloud-init didn't finish (package install, no DNS on test VLAN); *Check first* (`cloud-init status --long`); *Safe fix*; pills *Recreate is safe* and *Stateless*.
+Click **Approve and deploy**. Progress steps all green, `100 wpsite` appears under Production.
 
-> "It tells me what to check, what's safe to do, and, importantly, whether recreating is OK or whether this VM might hold data and needs backup/restore instead. For a disposable TEST VM: recreate."
+## 11:30 Stack (VM + container + Docker)
 
-Click **Recreate VM** → the confirmation dialog explains the data loss → **Recreate**.
+Click **Stacks → Create stack**. Type *WordPress for marketing with monitoring*, **Draft with assistant**.
 
-**Expected:** Plan card shows a red *Replace* row and the **Destructive change** callout, Plan review says **High risk**; job log `Destroying... Creating...`.
+> "Now a whole application. The assistant proposes a VM as Docker host running WordPress and MariaDB, and a lightweight LXC container running Prometheus and Grafana. I can edit everything. Passwords are `secret:` references: the machine generates them, they never pass through this console."
 
-> "Note the AI flags this as HIGH risk because it destroys a VM. In TEST that's fine; in production the same action needs approval."
+**Continue → Create plan** (one plan for both machines) → **Deploy stack to Test** → on the stack page **Validate stack** (container checks, published ports, baseline on each machine) → **Request production approval** → same dialog, `PROMOTE`, for the whole stack at once.
 
-## 9:30 Validation passes
+## 13:30 Security model and closing
 
-Untick *Simulate failure*, click **Validate**.
+> "Recap:
+> - The Proxmox token never leaves the backend, it is least-privilege and can be a Docker secret.
+> - Test and Production have separate state, ID ranges and limits, enforced in the API and in OpenTofu.
+> - Production needs a passing validation and a person: checkbox, typed word, audit trail.
+> - The AI drafts, explains and diagnoses. It can't install anything nobody approved, and it has no path to production."
 
-**Expected:** all checks ✔ (IP from the guest agent, `boot-finished present`, `tcp/…:80 open`, *Software configured: base, docker, nginx*), status **Passed**.
-
-## 10:00 Production promotion
-
-Point at the **Production approval** panel gates: *TEST validation passed ✔*.
-
-Click **Request Production Promotion**.
-
-**Expected:** the **Production approval** card gets an amber outline and *Awaiting approval*; production plan `1 to add` for `demo-web`, VMID 100–299; review **Medium risk** (production change).
-
-> "The spec was copied from the validated TEST VM. The production plan is ready, and **nothing has changed yet**. The job is parked."
-
-Show that **Approve** is disabled. Tick *"I understand this will change production"*, type `promote` in lowercase (still disabled), then `PROMOTE`.
-
-> "Checkbox plus typed confirmation. And this isn't just UI: the API checks all of it again, plus that validation is still valid, that the plan is less than an hour old and wasn't already approved."
-
-Click **Approve & promote to production**.
-
-**Expected:** toast *Production updated*; the progress bar completes; History shows *Promotion approved* and *Promote to production · Succeeded*; **Managed VMs** and the resource tree list `100 (demo-web)` under Production.
-
-Optional (30 s): switch to **Production**, select `demo-web` from Managed VMs, click **Recreate VM** → the approval panel asks for `RECREATE`, the plan is DESTRUCTIVE and the AI says **HIGH** risk. Click **Reject**.
-
-## 12:30 Security model and closing
-
-> "Recap of the guardrails:
-> - The Proxmox token never leaves the backend, it's least-privilege, scrubbed from logs, and can be a Docker secret.
-> - TEST and PRODUCTION have separate state and separate VM ID ranges, and limits are enforced in the API **and** in OpenTofu.
-> - Production needs a passing validation and a human: checkbox, typed word, audit trail.
-> - The AI makes us faster at the boring parts (writing specs, reading plans, triage), but it has no credentials and no path to production.
->
-> And everything you saw also runs fully offline in mock mode, which is how I make sure a live demo survives a dead VPN."
-
-Show the **History** table as the closing image.
+Close on **Activity**: every step with who did it.
 
 ---
 
@@ -169,17 +127,18 @@ sed -i 's/^LIVE_MODE=.*/LIVE_MODE=false/' .env
 docker compose up -d backend          # recreates the backend with the new mode (~10 s)
 ```
 
-The header switches to **Mock mode**; every step above works identically (simulated VM IDs, IPs from 192.0.2.0/24). If the Anthropic API is unreachable, AI answers come from the local fallback automatically (`source: local-fallback`); no action needed.
+The header shows **Demo mode**; every step above works identically (simulated IDs, IPs from 192.0.2.0/24, repository lookups from the bundled index). Without the Anthropic API the assistant answers from local rules automatically.
 
-Say: *"The Proxmox host isn't reachable from here, so I'm switching to the built-in simulation. Same code paths, same guardrails, simulated hypervisor."*
+Say: *"The Proxmox host isn't reachable from here, so I'm switching to the built-in simulation. Same code paths, same guardrails."*
 
 Clean slate between rehearsals: `docker compose down -v && docker compose up -d`.
 
 ## Pre-demo checklist
 
 - [ ] `docker compose up -d --build` done, both containers `healthy`
-- [ ] `docker compose down -v && docker compose up -d` for empty history (mock: templates start missing so you can show *Prepare Platform*; set `MOCK_PLATFORM_READY=true` to skip that part)
-- [ ] Browser zoom 110–125 %, dark mode, notifications off
-- [ ] Live mode only: templates 9000/9001 exist, test VLAN has DHCP + DNS, `curl` to the API works from the console host, no leftover VMs in 900–999 / 100–299 with the demo names
+- [ ] `docker compose down -v && docker compose up -d` for an empty history (templates start missing so you can show the platform step; `MOCK_PLATFORM_READY=true` skips it)
+- [ ] `DEBIAN_12_CT_URL` / `UBUNTU_2404_CT_URL` set (for the stack part)
+- [ ] Browser zoom 110–125 %, notifications off, light theme (dark as an optional show-off)
+- [ ] Live mode only: bootstrap done, test VLAN has DHCP + DNS, `ANSIBLE_SSH_KEY_FILE` set, no leftover machines with the demo names
 - [ ] Mock fallback rehearsed once (`LIVE_MODE=false`)
-- [ ] `.env` not on screen (no secrets in the terminal history you show)
+- [ ] `.env` and `secrets/` not on screen

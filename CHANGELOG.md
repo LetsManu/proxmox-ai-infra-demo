@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.0.0 – 2026-10-18
+
+The assistant now plans whole applications, and the console is rebuilt for office and IT staff.
+
+**Stacks**
+- A stack is several machines deployed, validated and promoted together: VMs, **LXC containers** (new `infra/modules/lxc`, `var.containers`) and **Docker services** on a Docker host in the stack (compose file rendered by the console, run by the `docker_services` role).
+- Docker services can only express images, published ports, named volumes and plain settings. Passwords are `secret:<name>` references; the host generates them into `/opt/stacks/<stack>/.env` (mode 0600) and they never reach the console.
+- *Create stack*: the assistant (Claude, or local recipes offline) drafts the architecture, you edit it, review one plan for all members and deploy. Whole-stack validation and whole-stack promotion with one typed `PROMOTE` approval. Recreate rebuilds all members; removing a component destroys it.
+- The platform stack also downloads the official LXC templates (`DEBIAN_12_CT_URL`, `UBUNTU_2404_CT_URL`).
+
+**Software chosen by the assistant**
+- Each need of a request is listed as *required* or *optional* and resolved to an existing profile, a package checked against the real repository (packages.ubuntu.com, packages.debian.org, Chocolatey; cached, with an offline index), or a drafted Ansible role.
+- Drafted roles go through automated review (allowed modules only, HTTPS downloads, no literal secrets, `ansible-playbook --syntax-check`) and wait in the **review queue**; approved roles become software profiles.
+
+**Automated tests**
+- Validate now runs a **security baseline** (SSH hardening, automatic updates, guest agent, Windows firewall, no exposed database ports) and **application tests**, inside the machine (Ansible, `infra/ansible/tests.yml`) and from the network. Tests are typed, declarative checks; failures block promotion.
+- *Draft tests with assistant* proposes an application test suite; it is used after approval.
+
+**Console redesign** (see `UI_GUIDELINES.md`)
+- Light Proxmox-style theme by default, optional dark theme; colour only for meaning.
+- Dashboard with status cards and recent activity; guided *Create VM* wizard; machine and stack pages with lifecycle steps and one primary action; review queue for production requests and AI drafts; platform and activity pages; shareable URLs.
+- Component library: cards, badges, fields, modals with typed confirmation, drawers for plans/logs/AI output, toasts with *View details*, status cards, friendly error panels, data tables, progress steps.
+
+**Fixes**
+- Ansible runs with `stdin=/dev/null` (it refused to start under some process managers).
+- Test machine names must leave a valid production name (`wp-test` would promote to `wp`).
+
 ## 1.3.0 – 2026-10-18
 
 Software is per project instead of a fixed list.

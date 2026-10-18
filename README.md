@@ -8,16 +8,18 @@ A small self-hosted platform that turns **"I need a VM"** into a reviewed, valid
 Bootstrap (once) ─▶ Platform: cloud images + templates ─▶ Plan ─▶ AI review ─▶ TEST deploy + Ansible ─▶ Validate ─▶ Human approval ─▶ PRODUCTION
 ```
 
-- **Web console** (Vue 3) to describe, plan, deploy, validate, promote and recreate VMs
+- **Web console** (Vue 3) for office and IT staff: dashboard, guided wizards, review queue, light Proxmox-style theme with optional dark mode ([UI_GUIDELINES.md](UI_GUIDELINES.md))
 - **Backend API** (FastAPI) that alone holds the Proxmox API token
 - **Creates everything it needs, as code**: a one-time admin bootstrap (user, role, token, pool, storage, SDN vnets) and a platform stack the console runs itself (official cloud images → templates)
 - **Infrastructure as Code** with OpenTofu/Terraform and the `bpg/proxmox` provider, separate state per stack and environment
-- **Configures the VMs** with Ansible after deploy: Linux over SSH, Windows over WinRM, from a fixed catalog of software profiles (Docker, Nginx, PostgreSQL, monitoring, IIS, admin tools)
-- **AI assistance** (Claude): natural-language VM specs, plain-English plan reviews with a risk rating, troubleshooting. Advisory only.
+- **Configures the machines** with Ansible after deploy: Linux over SSH, Windows over WinRM, from software profiles discovered per project plus apt/Chocolatey packages
+- **Stacks**: several VMs, LXC containers and Docker services deployed, validated and promoted together ([docs/stacks.md](docs/stacks.md))
+- **AI assistance** (Claude): drafts machines and whole architectures, works out which software a request needs (required vs. optional, checked against the real package repositories), drafts Ansible roles and test suites for review, explains plans with a risk rating, diagnoses failures. Advisory only: drafts wait in a review queue.
+- **Automated tests**: security baseline plus application tests on every validation, inside the machine and from the network ([docs/testing.md](docs/testing.md))
 - **TEST** for disposable VMs, **PRODUCTION** behind validation plus explicit human approval
 - **Mock mode** runs the whole workflow with no Proxmox, VPN, DNS or internet
 
-![Dashboard](docs/images/03-plan.png)
+![Dashboard](docs/images/19-dashboard.png)
 
 ---
 
@@ -152,16 +154,20 @@ The **Platform** panel lists every resource the console depends on and who creat
 
 ### Test deployment
 
-1. Pick **Test**, fill the form (or let the AI draft it) and tick the **Software** profiles.
-2. **Generate Plan**: the backend checks the template exists, allocates a free VM ID in 900–999, renders `var.vms` from its database and runs `tofu plan -out`. The AI reviews the plan.
-3. **Deploy to Test** applies **exactly that saved plan**, then Ansible installs the base configuration and the selected profiles. Changing the form invalidates the plan (server-side check). **Configure** re-runs Ansible.
-4. **Validate**: running, setup finished, guest-agent IP, software configured, optional port check.
+1. **Create VM**: describe the need; the assistant drafts size, OS and the software (required and optional, each matched to a profile, a repository package or a role draft). Review the **Basics** and **Software** steps.
+2. **Create plan**: the backend checks the template exists, allocates a free VM ID in 900–999, renders `var.vms` from its database and runs `tofu plan -out`. The plan is shown as a sentence, a list of changes and a risk rating (**Why?** for details, **View full plan** for the raw output).
+3. **Deploy to Test** applies **exactly that saved plan**, then Ansible installs the base configuration and the software. Changing anything invalidates the plan (server-side check). **Install software again** re-runs Ansible.
+4. **Validate**: platform checks, security baseline and application tests. **Draft tests with assistant** proposes an application suite for the review queue.
+
+### Stacks
+
+**Stacks → Create stack**: the assistant proposes VMs, containers and Docker services, you edit them, then one plan, one deploy, one validation and one production approval for all members. See [docs/stacks.md](docs/stacks.md).
 
 ### Production promotion
 
 1. Requires a **PASS** validation of the TEST VM that is newer than its last deployment.
-2. **Request Production Promotion**: the TEST spec is copied to PRODUCTION (`-test` suffix dropped, prod network, full clone, VM ID 100–299) and planned. The job parks in `awaiting_approval`. **Nothing changes.**
-3. The approver reads the plan and the AI risk review, ticks *"I understand this will change production"* and types `PROMOTE`.
+2. **Request production approval**: the TEST spec is copied to PRODUCTION (`-test` suffix dropped, prod network, full clone, VM ID 100–299) and planned. The job parks in `awaiting_approval`. **Nothing changes.**
+3. The approver sees exactly what will happen in a dialog, ticks *"I understand this will affect the production environment."* and types `PROMOTE`. Requests can also be approved or rejected later from the **Review queue**.
 4. The backend re-checks every condition (job state, age < 60 min, acknowledgement, exact word, TEST validation) and applies the saved plan. Each decision is recorded in history.
 
 The same flow is available on the command line: `infra/scripts/promote.sh` refuses to run without an interactive terminal and asks for `PROMOTE`.
@@ -223,7 +229,11 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | POST | `/api/vms/power` | Start/stop (TEST only) |
 | GET | `/api/platform`, `/api/profiles` | Platform resource status; discovered software profiles (re-read per call) |
 | POST | `/api/platform/plan`, `/api/platform/apply` | Plan / apply the platform stack (jobs) |
-| POST | `/api/ai/generate-vm-spec`, `/api/ai/summarize-plan`, `/api/ai/troubleshoot` | AI (advisory) |
+| GET | `/api/jobs?status=&vm_name=&action=` | Recent jobs (no logs) |
+| GET / POST | `/api/vms/tests`, `/api/vms/tests/draft` | Test suite of a machine; draft an application suite (proposal) |
+| GET / POST | `/api/stacks`, `/api/stacks/plan`, `/api/stacks/deploy`, `/api/stacks/validate`, `/api/stacks/promote` | Stacks |
+| GET / POST | `/api/proposals`, `/api/proposals/{id}/approve`, `/api/proposals/{id}/reject` | Review queue for AI drafts |
+| POST | `/api/ai/generate-vm-spec`, `/api/ai/generate-stack`, `/api/ai/summarize-plan`, `/api/ai/troubleshoot` | AI (advisory) |
 
 Interactive docs: `http://localhost:8000/docs` (backend port, localhost only).
 

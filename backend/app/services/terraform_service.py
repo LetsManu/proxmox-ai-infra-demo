@@ -173,7 +173,8 @@ class TerraformService:
         cmd = [self.s.iac_binary, *args]
         log(f"$ {' '.join(cmd)}")
         proc = subprocess.Popen(cmd, cwd=cwd, env=self._env(env), stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+                                stderr=subprocess.STDOUT, text=True, bufsize=1,
+                            stdin=subprocess.DEVNULL)
         out = []
         assert proc.stdout is not None
         for line in proc.stdout:
