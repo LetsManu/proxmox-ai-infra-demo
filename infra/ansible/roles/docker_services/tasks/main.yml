@@ -1,0 +1,45 @@
+# Runs a stack's Docker services on this host with Docker Compose.
+# compose_yaml is rendered and validated by the console (images, ports, named
+# volumes, plain env values). Secrets are generated here, on the host, into
+# /opt/stacks/<stack>/.env (mode 0600) and referenced as ${NAME} in the compose
+# file: they never pass through the console, its database or its logs.
+
+- name: Stack directory
+  ansible.builtin.file:
+    path: "/opt/stacks/{{ stack_name }}"
+    state: directory
+    mode: "0750"
+
+- name: Read existing secrets
+  ansible.builtin.slurp:
+    src: "/opt/stacks/{{ stack_name }}/.env"
+  register: existing_env
+  failed_when: false
+  no_log: true
+
+- name: Generate missing secrets (kept on the host)
+  ansible.builtin.copy:
+    dest: "/opt/stacks/{{ stack_name }}/.env"
+    mode: "0600"
+    content: |
+      {% set have = {} %}
+      {% for line in (existing_env.content | default('') | b64decode).splitlines() if '=' in line %}
+      {% set _ = have.update({line.split('=')[0]: line.split('=')[1]}) %}
+      {% endfor %}
+      {% for n in stack_secrets | default([]) %}
+      {{ n }}={{ have[n] if n in have else lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}
+      {% endfor %}
+  no_log: true
+
+- name: Write compose.yaml
+  ansible.builtin.copy:
+    dest: "/opt/stacks/{{ stack_name }}/compose.yaml"
+    content: "{{ compose_yaml }}"
+    mode: "0644"
+
+- name: docker compose up -d
+  ansible.builtin.command:
+    argv: [docker, compose, --project-name, "{{ stack_name }}", --env-file, .env, -f, compose.yaml, up, -d, --remove-orphans, --wait]
+    chdir: "/opt/stacks/{{ stack_name }}"
+  register: compose_up
+  changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"

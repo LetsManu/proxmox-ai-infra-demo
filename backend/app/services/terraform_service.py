@@ -25,14 +25,17 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from ..config import ENVIRONMENTS, Settings, placement
+from ..config import ENVIRONMENTS, Settings, ct_storage, placement
 
 Log = Callable[[str], None]
 
 RESOURCE = "proxmox_virtual_environment_vm"
+CT_RESOURCE = "proxmox_virtual_environment_container"
 
 
-def address(name: str) -> str:
+def address(name: str, kind: str = "vm") -> str:
+    if kind == "lxc":
+        return f'module.lxc["{name}"].{CT_RESOURCE}.this'
     return f'module.vm["{name}"].{RESOURCE}.this'
 
 
@@ -86,7 +89,31 @@ def vm_entry(spec: dict, vmid: int, template_id: int) -> dict:
         "packages": ci.get("packages") or [],
         "commands": ci.get("commands") or [],
         "os_family": t.get("os_family", "linux"),
+        "kind": "vm",
     }
+
+
+def ct_entry(settings: Settings, spec: dict, vmid: int) -> dict:
+    """Shape of one element of `var.containers` (plus "kind", stripped before rendering)."""
+    from ..config import ct_entry as catalog_entry, ct_volume_id
+
+    return {
+        "kind": "lxc",
+        "vm_id": vmid,
+        "template_file_id": ct_volume_id(settings, spec["template"]),
+        "os_type": catalog_entry(spec["template"])["os_type"],
+        "cores": spec["cores"],
+        "memory_mb": spec["memory_mb"],
+        "disk_gb": spec["disk_gb"],
+        "nesting": True,
+        "description": spec.get("description") or "",
+        "ssh_public_key": spec.get("ssh_public_key") or "",
+        "tags": spec.get("tags") or [],
+    }
+
+
+def entry_for(settings: Settings, spec: dict, vmid: int, template_id: int | None) -> dict:
+    return ct_entry(settings, spec, vmid) if spec.get("kind") == "lxc" else vm_entry(spec, vmid, template_id or 0)
 
 
 class TerraformService:
@@ -173,14 +200,17 @@ class TerraformService:
             "default_ssh_public_key": self.s.default_ssh_public_key,
             "snippets_datastore_id": self.s.snippets_datastore,
             "pool_id": self.s.pool_id,
-            "vms": vms,
+            "vms": {k: {f: x for f, x in v.items() if f != "kind"} for k, v in vms.items()
+                    if v.get("kind", "vm") == "vm"},
+            "containers": {k: {f: x for f, x in v.items() if f != "kind"} for k, v in vms.items()
+                           if v.get("kind") == "lxc"},
         }
         path = os.path.join(self.env_dir(env), "generated.tfvars.json")
         with open(path, "w") as fh:
             json.dump(generated, fh, indent=2)
         return [f"-var-file=environments/{env}.tfvars", f"-var-file={path}"]
 
-    def _platform_var_args(self, templates: dict) -> list[str]:
+    def _platform_var_args(self, templates: dict, ct_templates: dict | None = None) -> list[str]:
         generated = {
             "node_name": self.s.proxmox_node,
             "image_storage": self.s.image_storage,
@@ -190,6 +220,8 @@ class TerraformService:
             "ci_user": self.s.ci_user,
             "default_ssh_public_key": self.s.default_ssh_public_key,
             "templates": templates,
+            "ct_storage": ct_storage(self.s),
+            "ct_templates": ct_templates or {},
         }
         path = os.path.join(self.env_dir("platform"), "generated.tfvars.json")
         with open(path, "w") as fh:
@@ -211,7 +243,8 @@ class TerraformService:
                       {"create": "create", "update": "update", "delete": "destroy"}.get(actions[0], actions[0]))
             addr = rc["address"]
             name = addr.split('"')[1] if '"' in addr else addr
-            changes.append({"address": addr, "name": name, "action": action})
+            kind = "lxc" if addr.startswith("module.lxc[") else "vm"
+            changes.append({"address": addr, "name": name, "action": action, "kind": kind})
         return changes
 
     # -- platform stack (cloud images + templates) -----------------------------
@@ -225,16 +258,16 @@ class TerraformService:
         except (OSError, ValueError):
             return set()
         return {inst.get("index_key") for r in state.get("resources", [])
-                if r.get("type") == RESOURCE and r.get("name") == "template"
+                if (r.get("type"), r.get("name")) in ((RESOURCE, "template"), ("proxmox_download_file", "ct"))
                 for inst in r.get("instances", []) if inst.get("index_key")}
 
-    def plan_platform(self, templates: dict, job_id: str, log: Log) -> PlanResult:
+    def plan_platform(self, templates: dict, job_id: str, log: Log, ct_templates: dict | None = None) -> PlanResult:
         if not self.s.live_mode:
-            return mock_platform_plan(templates, self.s, log)
+            return mock_platform_plan(templates, self.s, log, ct_templates or {})
         src = self._prepare("platform")
         self._init("platform", src, log)
         plan_file = os.path.join(self.env_dir("platform"), "plans", f"{job_id}.tfplan")
-        text = self._run(["plan", "-input=false", "-no-color", *self._platform_var_args(templates),
+        text = self._run(["plan", "-input=false", "-no-color", *self._platform_var_args(templates, ct_templates),
                           f"-out={plan_file}"], "platform", src, log)
         return PlanResult(text=text, changes=self._show_changes("platform", src, plan_file, log), plan_file=plan_file)
 
@@ -252,7 +285,7 @@ class TerraformService:
         self._init(env, src, log)
         plan_file = os.path.join(self.env_dir(env), "plans", f"{job_id}.tfplan")
         args = ["plan", "-input=false", "-no-color", *self._var_args(env, vms), f"-out={plan_file}"]
-        args += [f"-replace={address(n)}" for n in (replace or [])]
+        args += [f"-replace={address(n, vms.get(n, {}).get('kind', 'vm'))}" for n in (replace or [])]
         text = self._run(args, env, src, log)
         changes = self._show_changes(env, src, plan_file, log)
         return PlanResult(text=text, changes=changes, plan_file=plan_file)
@@ -331,6 +364,52 @@ def _render_create(name: str, e: dict, env: str, s: Settings, sign: str = "+") -
     return lines
 
 
+def _render_ct(name: str, e: dict, env: str, s: Settings, sign: str = "+") -> list[str]:
+    p = placement(s, env)
+    tags = sorted({"managed-by-iac", env, "lxc", *e["tags"]})
+    return [
+        f'  {sign} resource "{CT_RESOURCE}" "this" {{',
+        '      + id            = (known after apply)',
+        f'      + node_name     = "{s.proxmox_node}"',
+        f'      + vm_id         = {e["vm_id"]}',
+        f'      + description   = "{e["description"]}"',
+        f'      + tags          = {_hcl_list(tags)}',
+        '      + unprivileged  = true',
+        '      + started       = true',
+        f'      + start_on_boot = {"true" if env == "prod" else "false"}',
+        '',
+        '      + operating_system {',
+        f'          + template_file_id = "{e["template_file_id"]}"',
+        f'          + type             = "{e["os_type"]}"',
+        '        }',
+        '      + cpu {',
+        f'          + cores = {e["cores"]}',
+        '        }',
+        '      + memory {',
+        f'          + dedicated = {e["memory_mb"]}',
+        '        }',
+        '      + disk {',
+        f'          + datastore_id = "{p["storage"]}"',
+        f'          + size         = {e["disk_gb"]}',
+        '        }',
+        '      + features {',
+        f'          + nesting = {"true" if e.get("nesting") else "false"}',
+        '        }',
+        '      + network_interface {',
+        f'          + bridge  = "{p["bridge"]}"',
+        '          + name    = "eth0"',
+        f'          + vlan_id = {p["vlan"]}',
+        '        }',
+        '      + initialization {',
+        f'          + hostname = "{name}"',
+        '          + user_account {',
+        '              + keys = (sensitive value)',
+        '            }',
+        '        }',
+        '    }',
+    ]
+
+
 def _diff_fields(old: dict, new: dict) -> list[tuple[str, object, object]]:
     keys = [("cores", "cpu.cores"), ("memory_mb", "memory.dedicated"), ("disk_gb", "disk.size"),
             ("description", "description"), ("tags", "tags")]
@@ -346,34 +425,38 @@ def mock_plan(env: str, desired: dict, current: dict, replace: list[str], s: Set
     symbols: set[str] = set()
     for name in sorted(set(desired) | set(current)):
         new, old = desired.get(name), current.get(name)
-        addr = address(name)
+        kind = (new or old).get("kind", "vm")
+        addr = address(name, kind)
+        res = CT_RESOURCE if kind == "lxc" else RESOURCE
+        render = _render_ct if kind == "lxc" else _render_create
         vmid = (new or old)["vm_id"]
         if new and not old:
-            changes.append({"address": addr, "name": name, "action": "create", "vm_id": vmid})
+            changes.append({"address": addr, "name": name, "action": "create", "vm_id": vmid, "kind": kind})
             symbols.add("+")
-            body += [f"  # {addr} will be created", *_render_create(name, new, env, s), ""]
+            body += [f"  # {addr} will be created", *render(name, new, env, s), ""]
         elif old and not new:
-            changes.append({"address": addr, "name": name, "action": "destroy", "vm_id": vmid})
+            changes.append({"address": addr, "name": name, "action": "destroy", "vm_id": vmid, "kind": kind})
             symbols.add("-")
             body += [f"  # {addr} will be destroyed",
-                     f'  - resource "{RESOURCE}" "this" {{',
+                     f'  - resource "{res}" "this" {{',
                      f'      - name  = "{name}" -> null',
                      f'      - vm_id = {old["vm_id"]} -> null',
                      "    }", ""]
         elif new and old:
-            forced = (name in replace or new["template_id"] != old["template_id"]
+            forced = (name in replace or new.get("template_id") != old.get("template_id")
+                      or new.get("template_file_id") != old.get("template_file_id")
                       or new["vm_id"] != old["vm_id"] or new["disk_gb"] < old["disk_gb"])
             if forced:
-                changes.append({"address": addr, "name": name, "action": "replace", "vm_id": vmid})
+                changes.append({"address": addr, "name": name, "action": "replace", "vm_id": vmid, "kind": kind})
                 symbols.add("-/+")
                 reason = "as requested" if name in replace else "because a forcing attribute changed"
                 body += [f"  # {addr} will be replaced, {reason}",
-                         *_render_create(name, new, env, s, sign="-/+"), ""]
+                         *render(name, new, env, s, sign="-/+"), ""]
             elif diffs := _diff_fields(old, new):
-                changes.append({"address": addr, "name": name, "action": "update", "vm_id": vmid})
+                changes.append({"address": addr, "name": name, "action": "update", "vm_id": vmid, "kind": kind})
                 symbols.add("~")
                 body += [f"  # {addr} will be updated in-place",
-                         f'  ~ resource "{RESOURCE}" "this" {{',
+                         f'  ~ resource "{res}" "this" {{',
                          f'        id   = "{old["vm_id"]}"',
                          f'        name = "{name}"']
                 body += [f"      ~ {label} = {json.dumps(a)} -> {json.dumps(b)}" for label, a, b in diffs]
@@ -429,12 +512,16 @@ def _mock_platform_keys(s: Settings) -> list[str]:
     from ..config import TEMPLATE_CATALOG
     from .proxmox_service import get_proxmox
 
+    from ..config import CT_CATALOG, ct_volume_id
+
     px = get_proxmox(s)
+    have_ct = px.list_ct_templates(ct_storage(s))
     return [t["key"] for t in TEMPLATE_CATALOG
-            if t["buildable"] and px.template_exists(int(getattr(s, t["setting"])))]
+            if t["buildable"] and px.template_exists(int(getattr(s, t["setting"])))] + \
+        [c["key"] for c in CT_CATALOG if getattr(s, c["url_setting"]) and ct_volume_id(s, c["key"]) in have_ct]
 
 
-def mock_platform_plan(templates: dict, s: Settings, log: Log) -> PlanResult:
+def mock_platform_plan(templates: dict, s: Settings, log: Log, ct_templates: dict | None = None) -> PlanResult:
     tool = "OpenTofu" if s.iac_binary == "tofu" else "Terraform"
     log(f"[mock] {s.iac_binary} init -backend-config=path=/workspace/state/platform/terraform.tfstate")
     log(f"[mock] {s.iac_binary} plan (infra/platform)")
@@ -474,6 +561,18 @@ def mock_platform_plan(templates: dict, s: Settings, log: Log) -> PlanResult:
             "    }",
             "",
         ]
+    from .proxmox_service import get_proxmox
+
+    have_ct = get_proxmox(s).list_ct_templates(ct_storage(s))
+    for key, t in sorted((ct_templates or {}).items()):
+        if f"{ct_storage(s)}:vztmpl/{t['file_name']}" in have_ct:
+            continue
+        addr = f'proxmox_download_file.ct["{key}"]'
+        changes.append({"address": addr, "name": key, "action": "create", "vm_id": None})
+        body += [f"  # {addr} will be created", '  + resource "proxmox_download_file" "ct" {',
+                 '      + content_type = "vztmpl"', f'      + datastore_id = "{ct_storage(s)}"',
+                 f'      + file_name    = "{t["file_name"]}"', f'      + node_name    = "{s.proxmox_node}"',
+                 f'      + url          = "{t["url"]}"', "    }", ""]
     if not changes:
         text = f"No changes. Your infrastructure matches the configuration.\n\n{tool} found no differences."
     else:
@@ -495,7 +594,12 @@ def mock_platform_apply(plan: dict, s: Settings, log: Log) -> dict:
     for ch in plan.get("changes", []):
         log(f"{ch['address']}: Creating...")
         time.sleep(delay)
-        if "download_file" in ch["address"]:
+        if ch["address"].startswith("proxmox_download_file.ct["):
+            from ..config import ct_volume_id
+
+            px.add_ct_template(ct_volume_id(s, ch["name"]))
+            log(f"{ch['address']}: Creation complete after 12s (LXC template downloaded)")
+        elif "download_file" in ch["address"]:
             log(f"{ch['address']}: Still creating... [20s elapsed] (downloading cloud image)")
             time.sleep(delay)
             log(f"{ch['address']}: Creation complete after 41s")

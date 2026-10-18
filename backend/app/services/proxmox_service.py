@@ -108,22 +108,25 @@ class ProxmoxClient:
             data["storage"] = storage
         self.wait_task(self.post(f"/nodes/{self.node}/qemu/{template_id}/clone", data))
 
-    def start_vm(self, vmid: int) -> None:
-        self.wait_task(self.post(f"/nodes/{self.node}/qemu/{vmid}/status/start"))
+    def start_vm(self, vmid: int, kind: str = "vm") -> None:
+        self.wait_task(self.post(f"/nodes/{self.node}/{'lxc' if kind == 'lxc' else 'qemu'}/{vmid}/status/start"))
 
-    def stop_vm(self, vmid: int) -> None:
-        self.wait_task(self.post(f"/nodes/{self.node}/qemu/{vmid}/status/stop"))
+    def stop_vm(self, vmid: int, kind: str = "vm") -> None:
+        self.wait_task(self.post(f"/nodes/{self.node}/{'lxc' if kind == 'lxc' else 'qemu'}/{vmid}/status/stop"))
 
     def delete_vm(self, vmid: int) -> None:
         self.wait_task(self.delete(f"/nodes/{self.node}/qemu/{vmid}", purge=1))
 
-    def vm_status(self, vmid: int) -> dict:
-        st = self.get(f"/nodes/{self.node}/qemu/{vmid}/status/current")
+    def vm_status(self, vmid: int, kind: str = "vm") -> dict:
+        st = self.get(f"/nodes/{self.node}/{'lxc' if kind == 'lxc' else 'qemu'}/{vmid}/status/current")
         return {"status": st.get("status"), "uptime": st.get("uptime"), "agent": st.get("agent"),
                 "name": st.get("name"), "qmpstatus": st.get("qmpstatus")}
 
-    def guest_ips(self, vmid: int) -> list[str]:
-        """IPv4 addresses reported by the QEMU guest agent (excluding loopback)."""
+    def guest_ips(self, vmid: int, kind: str = "vm") -> list[str]:
+        """IPv4 addresses reported by the QEMU guest agent / the container (excluding loopback)."""
+        if kind == "lxc":
+            return [i["inet"].split("/")[0] for i in self.get(f"/nodes/{self.node}/lxc/{vmid}/interfaces") or []
+                    if i.get("name") != "lo" and i.get("inet") and not i["inet"].startswith("127.")]
         data = self.get(f"/nodes/{self.node}/qemu/{vmid}/agent/network-get-interfaces")
         ips = []
         for iface in (data or {}).get("result", []):
@@ -153,6 +156,13 @@ class ProxmoxClient:
 
     def list_pools(self) -> list[str]:
         return [p["poolid"] for p in self.get("/pools") or []]
+
+    def list_ct_templates(self, storage: str) -> set[str]:
+        """Volume IDs of downloaded LXC templates on a storage."""
+        try:
+            return {c["volid"] for c in self.get(f"/nodes/{self.node}/storage/{storage}/content", content="vztmpl") or []}
+        except ProxmoxError:
+            return set()
 
     def list_vnets(self) -> list[str]:
         try:
@@ -246,27 +256,52 @@ class MockProxmox:
     def used_vmids(self) -> set[int]:
         return set(self.templates) | set(self.vms)
 
-    def register_vm(self, vmid: int, name: str, env: str, fail: bool = False, windows: bool = False) -> None:
+    def register_vm(self, vmid: int, name: str, env: str, fail: bool = False, windows: bool = False,
+                    kind: str = "vm") -> None:
         net = "192.0.2" if env == "test" else "198.51.100"  # RFC 5737 documentation ranges
         with self._lock:
             self.vms[vmid] = {"name": name, "status": "running", "started": time.time(),
-                              "ip": f"{net}.{random.randint(20, 220)}", "fail": fail, "windows": windows}
+                              "ip": f"{net}.{random.randint(20, 220)}", "fail": fail, "windows": windows,
+                              "kind": kind}
+
+    def _ct_file(self) -> str:
+        import os
+
+        return os.path.join(self.s.workspace_dir, "state", "platform", "mock-ct-templates.json")
+
+    def list_ct_templates(self, storage: str) -> set[str]:
+        import json
+
+        try:
+            with open(self._ct_file()) as fh:
+                return set(json.load(fh))
+        except (OSError, ValueError):
+            return set()
+
+    def add_ct_template(self, volid: str) -> None:
+        import json
+        import os
+
+        have = self.list_ct_templates("") | {volid}
+        os.makedirs(os.path.dirname(self._ct_file()), exist_ok=True)
+        with open(self._ct_file(), "w") as fh:
+            json.dump(sorted(have), fh)
 
     def clone_vm(self, template_id: int, new_id: int, name: str, full: bool, storage: str | None = None) -> None:
         self.register_vm(new_id, name, "test")
 
-    def start_vm(self, vmid: int) -> None:
+    def start_vm(self, vmid: int, kind: str = "vm") -> None:
         self.vms.setdefault(vmid, {"name": f"vm-{vmid}", "ip": "192.0.2.50", "fail": False})
         self.vms[vmid].update(status="running", started=time.time())
 
-    def stop_vm(self, vmid: int) -> None:
+    def stop_vm(self, vmid: int, kind: str = "vm") -> None:
         if vmid in self.vms:
             self.vms[vmid]["status"] = "stopped"
 
     def delete_vm(self, vmid: int) -> None:
         self.vms.pop(vmid, None)
 
-    def vm_status(self, vmid: int) -> dict:
+    def vm_status(self, vmid: int, kind: str = "vm") -> dict:
         vm = self.vms.get(vmid)
         if not vm:
             raise ProxmoxError(f"VM {vmid} does not exist on node {self.node}")
@@ -274,7 +309,7 @@ class MockProxmox:
         return {"status": vm["status"], "uptime": uptime, "agent": 1, "name": vm["name"],
                 "qmpstatus": vm["status"]}
 
-    def guest_ips(self, vmid: int) -> list[str]:
+    def guest_ips(self, vmid: int, kind: str = "vm") -> list[str]:
         vm = self.vms.get(vmid)
         if not vm or vm["status"] != "running":
             raise ProxmoxError("QEMU guest agent is not running")
@@ -289,6 +324,10 @@ class MockProxmox:
         if not vm or vm["status"] != "running":
             return None
         return "Microsoft Windows Server 2022 Standard" if vm.get("windows") else "Ubuntu 24.04 LTS"
+
+    def ct_ready(self, vmid: int) -> bool:
+        vm = self.vms.get(vmid)
+        return bool(vm and vm["status"] == "running" and not vm.get("fail"))
 
     def set_failure(self, vmid: int, fail: bool) -> None:
         if vmid in self.vms:

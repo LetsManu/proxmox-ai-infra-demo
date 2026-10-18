@@ -47,3 +47,18 @@ variable "templates" {
   }))
   default = {}
 }
+
+variable "ct_storage" {
+  description = "Storage with content type 'vztmpl' for LXC templates."
+  type        = string
+  default     = "local"
+}
+
+variable "ct_templates" {
+  description = "LXC templates to download from the Proxmox template mirror, keyed by catalog key."
+  type = map(object({
+    url       = string
+    file_name = string
+  }))
+  default = {}
+}

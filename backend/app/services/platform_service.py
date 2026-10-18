@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import re
 
-from ..config import TEMPLATE_CATALOG, Settings
+from ..config import CT_CATALOG, TEMPLATE_CATALOG, Settings, ct_file_name, ct_storage, ct_volume_id
 from .proxmox_service import ProxmoxError, get_proxmox
 from .template_service import image_url_for
 from .terraform_service import TerraformService
@@ -39,6 +39,19 @@ def desired_templates(settings: Settings) -> dict:
         if t["key"] in managed or not px.template_exists(vmid):
             out[t["key"]] = {"vm_id": vmid, "name": f"tmpl-{t['key']}", "image_url": url,
                              "file_name": _file_name(url, t["key"])}
+    return out
+
+
+def desired_ct_templates(settings: Settings) -> dict:
+    """LXC templates declared in the platform stack: configured ones that are missing or already managed."""
+    px = get_proxmox(settings)
+    managed = TerraformService(settings).platform_managed_keys()
+    have = px.list_ct_templates(ct_storage(settings))
+    out = {}
+    for c in CT_CATALOG:
+        url = getattr(settings, c["url_setting"])
+        if url and (c["key"] in managed or ct_volume_id(settings, c["key"]) not in have):
+            out[c["key"]] = {"url": url, "file_name": ct_file_name(settings, c["key"])}
     return out
 
 
@@ -76,6 +89,15 @@ def status(settings: Settings) -> dict:
                               ("Built from the official cloud image" if image_url_for(settings, t["key"])
                                else f"Set {t['image_setting'].upper()} to build it") if t["buildable"]
                               else "Provide once: docs/windows-template.md"))
+
+    have_ct = px.list_ct_templates(ct_storage(settings)) if reachable else set()
+    for c in CT_CATALOG:
+        configured = bool(getattr(settings, c["url_setting"]))
+        resources.append(item("CT template", c["label"], configured and ct_volume_id(settings, c["key"]) in have_ct,
+                              "platform", f"Official Proxmox LXC template on {ct_storage(settings)}" if configured
+                              else f"Set {c['url_setting'].upper()} to use containers"))
+        if not configured:
+            resources[-1]["status"] = "not configured" if reachable else "unknown"
 
     buildable_missing = [r for r in resources if r["owner"] == "platform" and r["status"] == "missing"]
     blocking = [r for r in resources if r["owner"] == "bootstrap" and r["status"] == "missing"]

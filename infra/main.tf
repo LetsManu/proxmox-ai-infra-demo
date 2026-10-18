@@ -34,11 +34,39 @@ module "vm" {
   admin_password = each.value.os_family == "windows" ? var.windows_admin_password : ""
 }
 
+module "lxc" {
+  source   = "./modules/lxc"
+  for_each = var.containers
+
+  name             = each.key
+  node_name        = var.node_name
+  vm_id            = each.value.vm_id
+  vm_id_min        = var.vm_id_min
+  vm_id_max        = var.vm_id_max
+  template_file_id = each.value.template_file_id
+  os_type          = each.value.os_type
+
+  cores     = each.value.cores
+  memory_mb = each.value.memory_mb
+  disk_gb   = each.value.disk_gb
+  nesting   = each.value.nesting
+
+  datastore_id = var.datastore_id
+  bridge       = var.bridge
+  vlan_id      = var.vlan_id
+
+  ssh_public_key = coalesce(each.value.ssh_public_key, var.default_ssh_public_key, " ")
+  description    = each.value.description != "" ? each.value.description : "Managed by proxmox-ai-infra-demo (${var.environment})"
+  tags           = concat(["managed-by-iac", var.environment, "lxc"], var.base_tags, each.value.tags)
+  start_on_boot  = var.start_on_boot
+  pool_id        = var.pool_id
+}
+
 # Policy guardrails evaluated on every plan.
 check "resource_limits" {
   assert {
     condition = alltrue([
-      for k, v in var.vms : v.cores <= var.max_cores && v.memory_mb <= var.max_memory_mb && v.disk_gb <= var.max_disk_gb
+      for k, v in merge(var.vms, var.containers) : v.cores <= var.max_cores && v.memory_mb <= var.max_memory_mb && v.disk_gb <= var.max_disk_gb
     ])
     error_message = "One or more VMs exceed the ${var.environment} limits (${var.max_cores} vCPU / ${var.max_memory_mb} MB / ${var.max_disk_gb} GB)."
   }

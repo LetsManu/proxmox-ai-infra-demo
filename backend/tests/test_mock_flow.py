@@ -36,7 +36,7 @@ def test_health_and_inventory(client):
     status = client.get("/api/proxmox/status").json()
     assert status["connected"] and status["templates"]
     assert "secret" not in str(status).lower()
-    templates = {t["key"]: t for t in client.get("/api/templates").json()}
+    templates = {t["key"]: t for t in client.get("/api/templates").json() if t["kind"] == "vm"}
     assert set(templates) == {"ubuntu-24-04", "debian-12", "windows-2022"}
     assert templates["windows-2022"]["available"] and not templates["ubuntu-24-04"]["available"]
     assert {p["key"] for p in client.get("/api/profiles").json()} >= {"docker", "nginx", "iis"}
@@ -47,7 +47,7 @@ def test_health_and_inventory(client):
 def test_platform_builds_missing_templates(client):
     st = client.get("/api/platform").json()
     assert st["needs_platform_apply"] and not st["ready"]
-    assert st["declared_templates"] == ["debian-12", "ubuntu-24-04"]
+    assert st["declared_templates"] == ["debian-12", "ubuntu-24-04", "debian-12-lxc", "ubuntu-24-04-lxc"]
 
     # A VM plan cannot run before its template exists
     early = wait(client, client.post("/api/vms/plan", json={"spec": SPEC}).json()["job_id"])
@@ -55,7 +55,7 @@ def test_platform_builds_missing_templates(client):
 
     plan = wait(client, client.post("/api/platform/plan").json()["job_id"])
     assert plan["status"] == "success", plan["logs"]
-    assert plan["result"]["plan"]["counts"] == {"create": 4, "update": 0, "destroy": 0}
+    assert plan["result"]["plan"]["counts"] == {"create": 6, "update": 0, "destroy": 0}  # 2 images, 2 templates, 2 CT templates
     applied = wait(client, client.post("/api/platform/apply", json={"plan_job_id": plan["id"]}).json()["job_id"])
     assert applied["status"] == "success", applied["logs"]
     assert client.post("/api/platform/apply", json={"plan_job_id": plan["id"]}).status_code == 409

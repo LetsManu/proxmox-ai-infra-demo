@@ -45,6 +45,7 @@ CHECK_TYPES: dict[str, dict] = {
     "sshd_setting": {"where": "inside", "os": {"linux"}, "fields": ["key", "value"]},
     "auto_updates": {"where": "inside", "os": {"linux"}, "fields": []},
     "firewall_enabled": {"where": "inside", "os": {"windows"}, "fields": []},
+    "container_running": {"where": "inside", "os": {"linux"}, "fields": ["service"]},
     "tcp_open": {"where": "external", "os": {"linux", "windows"}, "fields": ["port"]},
     "tcp_closed": {"where": "external", "os": {"linux", "windows"}, "fields": ["port"]},
     "http": {"where": "external", "os": {"linux", "windows"}, "fields": ["port", "path"]},
@@ -122,15 +123,22 @@ def _default_title(c: dict) -> str:
         "sshd_setting": f"SSH: {c.get('key')} {c.get('value')}",
         "auto_updates": "Automatic security updates are enabled",
         "firewall_enabled": "Windows Firewall is on for all profiles",
+        "container_running": f"Container {c.get('service')} is running",
         "tcp_open": f"Port {c.get('port')} is reachable from the network",
         "tcp_closed": f"Port {c.get('port')} is NOT reachable from the network",
         "http": f"HTTP on port {c.get('port')} answers from the network",
     }[t]
 
 
-def baseline(os_family: str, expected_ports: set[int]) -> list[dict]:
+def baseline(os_family: str, expected_ports: set[int], kind: str = "vm") -> list[dict]:
     """Security baseline: always part of validation, not AI-drafted."""
-    if os_family == "windows":
+    if kind == "lxc":  # no guest agent; Ansible logs in as root with a key, never a password
+        checks = [{"type": "sshd_setting", "key": "passwordauthentication", "value": "no",
+                   "title": "SSH password login is disabled"},
+                  {"type": "sshd_setting", "key": "permitrootlogin", "value": "without-password",
+                   "title": "SSH root login only with a key"},
+                  {"type": "auto_updates"}]
+    elif os_family == "windows":
         checks = [{"type": "firewall_enabled"},
                   {"type": "tcp_closed", "port": 5985, "title": "Unencrypted WinRM (5985) is not reachable"},
                   {"type": "service_running", "service": "QEMU-GA", "title": "QEMU guest agent is running"}]
@@ -194,7 +202,7 @@ def run_external(ip: str | None, checks: list[dict], *, mock: bool, fail: bool) 
 
 
 def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_family: str, checks: list[dict],
-               job_id: str, log: Log, mock: bool, fail: bool) -> list[dict]:
+               job_id: str, log: Log, mock: bool, fail: bool, kind: str = "vm") -> list[dict]:
     inside = [c for c in checks if c["where"] == "inside"]
     if not inside:
         return []
@@ -206,7 +214,8 @@ def run_inside(settings: Settings, *, name: str, env: str, ip: str | None, os_fa
     from .config_service import ConfigSkipped, ansible_env, inventory_for
 
     try:
-        inv_path, env_vars = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id), \
+        inv_path, env_vars = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id,
+                                           kind=kind), \
             ansible_env(settings)
     except ConfigSkipped as exc:
         return [{**c, "ok": True, "skipped": True, "detail": f"not run: {exc}"} for c in inside]
@@ -331,8 +340,21 @@ def build_suite(settings: Settings, vm_name: str, spec: dict, os_family: str) ->
     approved = app is not None
     if app is None:  # no reviewed suite yet: deterministic checks from the approved profiles only
         app = from_profiles(get_profiles(settings), spec.get("profiles") or [], spec.get("packages") or [], os_family)
+    app = app + service_checks(spec.get("services") or [])
     exposed = {c["port"] for c in app if c["type"] in ("tcp_open", "http")}
-    return {"checks": baseline(os_family, exposed) + app, "approved": approved}
+    return {"checks": baseline(os_family, exposed, spec.get("kind", "vm")) + app, "approved": approved}
+
+
+def service_checks(services: list[dict]) -> list[dict]:
+    """Docker services on this host: each container runs, each published port answers."""
+    checks: list[dict] = []
+    for svc in services:
+        checks.append({"type": "container_running", "service": svc["name"]})
+        for p in svc.get("ports") or []:
+            host_port = int(str(p).split(":")[0])
+            checks.append({"type": "tcp_open", "port": host_port,
+                           "title": f"{svc['name']} reachable on port {host_port}"})
+    return _norm(checks, "rules")
 
 
 def run_suite(settings: Settings, *, vm_name: str, env: str, spec: dict, os_family: str, ip: str | None,
@@ -341,7 +363,7 @@ def run_suite(settings: Settings, *, vm_name: str, env: str, spec: dict, os_fami
     checks = suite["checks"]
     log(f"Running {len(checks)} automated checks ({'reviewed suite' if suite['approved'] else 'rules only, no reviewed suite yet'})")
     results = run_inside(settings, name=vm_name, env=env, ip=ip, os_family=os_family, checks=checks,
-                         job_id=job_id, log=log, mock=mock, fail=fail) + \
+                         job_id=job_id, log=log, mock=mock, fail=fail, kind=spec.get("kind", "vm")) + \
         run_external(ip, checks, mock=mock, fail=fail)
     order = {c["id"]: i for i, c in enumerate(checks)}
     results.sort(key=lambda r: order.get(r["id"], 0))

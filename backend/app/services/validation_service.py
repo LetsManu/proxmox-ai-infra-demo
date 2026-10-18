@@ -43,7 +43,8 @@ def _poll(fn, timeout: float, interval: float):
 
 
 def validate_vm(settings: Settings, *, vmid: int, env: str, health_check_port: int | None,
-                health_check_path: str | None, simulate_failure: bool, log: Log, os_family: str = "linux") -> dict:
+                health_check_path: str | None, simulate_failure: bool, log: Log, os_family: str = "linux",
+                kind: str = "vm") -> dict:
     px = get_proxmox(settings)
     mock = isinstance(px, MockProxmox)
     if mock:
@@ -55,7 +56,7 @@ def validate_vm(settings: Settings, *, vmid: int, env: str, health_check_port: i
     # 1. running
     log(f"[1/4] Checking that VM {vmid} is running")
     try:
-        st = px.vm_status(vmid)
+        st = px.vm_status(vmid, kind)
         running = st["status"] == "running"
         checks.append(_check("vm_running", running, f"status={st['status']} uptime={st.get('uptime')}s"))
     except ProxmoxError as exc:
@@ -65,10 +66,11 @@ def validate_vm(settings: Settings, *, vmid: int, env: str, health_check_port: i
 
     # 2. guest agent IP
     ip = None
-    log("[2/4] Waiting for QEMU guest agent to report an IPv4 address")
+    log("[2/4] Waiting for " + ("the container to get an IPv4 address" if kind == "lxc"
+                                 else "QEMU guest agent to report an IPv4 address"))
     if running:
         try:
-            ips = _poll(lambda: px.guest_ips(vmid), timeout, interval)
+            ips = _poll(lambda: px.guest_ips(vmid, kind), timeout, interval)
             ip = ips[0] if ips else None
         except ProxmoxError as exc:
             log(f"      guest agent error: {exc}")
@@ -76,7 +78,12 @@ def validate_vm(settings: Settings, *, vmid: int, env: str, health_check_port: i
     log(f"      -> {'OK' if ip else 'FAIL'}: {checks[-1]['detail']}")
 
     # 3. guest initialisation: cloud-init (Linux) / guest OS ready via agent (Windows)
-    if os_family == "windows":
+    if kind == "lxc":
+        log("[3/4] Container booted (LXC has no cloud-init; Ansible prepares it)")
+        ready = bool(ip) and (px.ct_ready(vmid) if mock else True)
+        checks.append(_check("cloud_init_completed", ready, "container up with network" if ready else
+                             "container has no network or did not boot"))
+    elif os_family == "windows":
         log("[3/4] Waiting for Windows to finish setup (guest agent get-osinfo)")
         os_name = _poll(lambda: px.guest_os(vmid), timeout, interval) if running else None
         if mock and (simulate_failure or settings.mock_fail_validation):

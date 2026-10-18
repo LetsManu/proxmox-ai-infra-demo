@@ -382,6 +382,26 @@ def generate_vm_spec(settings: Settings, prompt: str) -> dict:
     return out
 
 
+def generate_stack(settings: Settings, prompt: str) -> dict:
+    """Architecture draft: VMs / LXC / Docker services. Validated; nothing is deployed."""
+    from . import stack_service
+
+    def checked(raw: dict) -> dict:
+        try:
+            return stack_service.finalize(settings, raw)
+        except stack_service.StackRejected as exc:
+            raise SpecRejected(exc.errors, exc.draft) from exc
+
+    out = _with_fallback(
+        settings,
+        lambda: checked(_call_claude(settings, stack_service.system_prompt(settings), prompt,
+                                     stack_service.STACK_SCHEMA)),
+        lambda: checked(stack_service.local_stack(settings, prompt)),
+    )
+    out["note"] = "Draft architecture. Edit it, then plan it: nothing is created until you deploy the reviewed plan."
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Troubleshooting
 # ---------------------------------------------------------------------------

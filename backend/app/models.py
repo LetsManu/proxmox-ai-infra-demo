@@ -97,3 +97,20 @@ class Proposal(Base):
     decided_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Stack(Base):
+    """A set of VMs / LXC containers (and Docker services on them) deployed and promoted together."""
+
+    __tablename__ = "stacks"
+    __table_args__ = (UniqueConstraint("name", "environment", name="uq_stack_name_env"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(64), index=True)
+    environment: Mapped[str] = mapped_column(String(16), index=True)
+    spec: Mapped[dict] = mapped_column(JSON, default=dict)
+    members: Mapped[list] = mapped_column(JSON, default=list)  # full machine names
+    deployed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_validation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    last_validation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

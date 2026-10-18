@@ -30,6 +30,10 @@
       ansible.builtin.include_role:
         name: packages_linux
       when: packages | default([]) | length > 0
+    - name: Run the stack's Docker services
+      ansible.builtin.include_role:
+        name: docker_services
+      when: compose_yaml | default('') | length > 0
 
 - name: Configure Windows VMs
   hosts: windows

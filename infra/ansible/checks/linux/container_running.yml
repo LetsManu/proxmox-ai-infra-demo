@@ -1,0 +1,10 @@
+- name: Inspect container
+  ansible.builtin.command:
+    argv: [docker, inspect, --format, "{{ '{{' }}.State.Status{{ '}}' }}", "{{ check.service }}"]
+  register: r
+  changed_when: false
+  failed_when: false
+- name: Evaluate
+  ansible.builtin.set_fact:
+    check_ok: "{{ r.rc == 0 and r.stdout | trim == 'running' }}"
+    check_detail: "container {{ check.service }} is {{ r.stdout | trim if r.rc == 0 else 'missing' }}"

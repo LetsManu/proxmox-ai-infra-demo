@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     image_storage: str = "local"
     ubuntu_2404_image_url: str = ""
     debian_12_image_url: str = ""
+    # LXC templates (vztmpl) for containers; downloaded by the platform stack
+    ct_storage: str = ""  # storage with content 'vztmpl' ('' = IMAGE_STORAGE)
+    debian_12_ct_url: str = ""
+    ubuntu_2404_ct_url: str = ""
 
     # --- Cloud-init defaults ---------------------------------------------
     ci_user: str = "ops"
@@ -162,6 +166,11 @@ ENVIRONMENTS: dict[str, EnvironmentPolicy] = {
 }
 
 
+# Totals for one stack (all components together), on top of the per-machine limits.
+STACK_LIMITS = {"test": {"cores": 16, "memory_mb": 32768, "disk_gb": 384, "components": 8},
+                "prod": {"cores": 48, "memory_mb": 98304, "disk_gb": 2048, "components": 8}}
+
+
 def normalize_env(value: str) -> str:
     v = (value or "").strip().lower()
     if v in ("production", "prod"):
@@ -225,6 +234,31 @@ TEMPLATE_CATALOG = [
 
 def template_entry(key: str) -> dict | None:
     return next((t for t in TEMPLATE_CATALOG if t["key"] == key), None)
+
+
+# LXC templates: official Proxmox system templates, downloaded by infra/platform.
+CT_CATALOG = [
+    {"key": "debian-12-lxc", "label": "Debian 12 (LXC)", "url_setting": "debian_12_ct_url", "os_type": "debian"},
+    {"key": "ubuntu-24-04-lxc", "label": "Ubuntu 24.04 (LXC)", "url_setting": "ubuntu_2404_ct_url",
+     "os_type": "ubuntu"},
+]
+
+
+def ct_entry(key: str) -> dict | None:
+    return next((t for t in CT_CATALOG if t["key"] == key), None)
+
+
+def ct_storage(settings: "Settings") -> str:
+    return settings.ct_storage or settings.image_storage
+
+
+def ct_file_name(settings: "Settings", key: str) -> str:
+    url = getattr(settings, ct_entry(key)["url_setting"]) or ""
+    return os.path.basename(url.split("?")[0])
+
+
+def ct_volume_id(settings: "Settings", key: str) -> str:
+    return f"{ct_storage(settings)}:vztmpl/{ct_file_name(settings, key)}"
 
 
 # Software profiles are discovered at runtime from Ansible roles: services/profile_service.py

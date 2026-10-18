@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .database import init_db, session_scope
 from .models import VirtualMachine
-from .routes import ai, plans, platform, promotion, proposals, validation, vms
+from .routes import ai, plans, platform, promotion, proposals, stacks, validation, vms
 from .services.proxmox_service import MockProxmox, get_proxmox
 from .services.template_service import os_family_for
 from .workers.job_runner import recover_interrupted_jobs
@@ -28,7 +28,8 @@ async def lifespan(_app: FastAPI):
         with session_scope() as db:
             for vm in db.query(VirtualMachine).all():
                 px.register_vm(vm.vmid, vm.name, vm.environment,
-                               windows=os_family_for(vm.spec.get("template", "")) == "windows")
+                               windows=os_family_for(vm.spec.get("template", "")) == "windows",
+                               kind=vm.spec.get("kind", "vm"))
     log.warning("Starting in %s mode", "LIVE" if settings.live_mode else "MOCK")
     yield
 
@@ -42,5 +43,5 @@ app.add_middleware(
 )
 
 for r in (vms.router, plans.router, validation.router, promotion.router, platform.router, proposals.router,
-          ai.router):
+          stacks.router, ai.router):
     app.include_router(r)

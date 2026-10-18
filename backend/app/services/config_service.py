@@ -16,6 +16,7 @@ import time
 from typing import Callable
 
 from ..config import Settings
+from . import compose_service
 from .profile_service import get_profiles, roles_path
 from .proxmox_service import MockProxmox, get_proxmox
 
@@ -38,25 +39,27 @@ def forget_host(settings: Settings, env: str, name: str) -> None:
         pass
 
 
-def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = None) -> str:
+def wait_for_ip(settings: Settings, vmid: int, log: Log, timeout: int | None = None, kind: str = "vm") -> str:
     px = get_proxmox(settings)
     mock = isinstance(px, MockProxmox)
     deadline = time.time() + (5 if mock else timeout or settings.validation_timeout_seconds)
-    log("Waiting for the QEMU guest agent to report an IPv4 address")
+    log("Waiting for " + ("the container's IPv4 address" if kind == "lxc"
+                          else "the QEMU guest agent to report an IPv4 address"))
     while True:
         try:
-            ips = px.guest_ips(vmid)
+            ips = px.guest_ips(vmid, kind)
             if ips:
                 log(f"Guest agent reports {ips[0]}")
                 return ips[0]
         except Exception:  # noqa: BLE001 - agent not up yet
             pass
         if time.time() > deadline:
-            raise RuntimeError("No IPv4 address from the QEMU guest agent; cannot configure the VM")
+            raise RuntimeError("No IPv4 address reported; cannot configure the machine")
         time.sleep(0.2 if mock else 5)
 
 
-def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os_family: str, job_id: str) -> str:
+def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os_family: str, job_id: str,
+                  kind: str = "vm") -> str:
     """Write a one-host inventory for this job; raises ConfigSkipped without credentials."""
     if not ip:
         raise ConfigSkipped("the VM has no IP address")
@@ -72,7 +75,7 @@ def inventory_for(settings: Settings, *, name: str, env: str, ip: str | None, os
     host = {"ansible_host": ip}
     if os_family == "linux":
         host.update({
-            "ansible_user": settings.ci_user,
+            "ansible_user": "root" if kind == "lxc" else settings.ci_user,  # LXC: root with key only
             "ansible_ssh_private_key_file": settings.ansible_ssh_key_file,
             "ansible_ssh_common_args": (f"-o StrictHostKeyChecking=accept-new "
                                         f"-o UserKnownHostsFile={known_hosts_path(settings, env, name)}"),
@@ -96,19 +99,25 @@ def ansible_env(settings: Settings) -> dict:
 
 
 def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family: str, profiles: list[str],
-                 job_id: str, log: Log, packages: list[str] | None = None) -> dict:
+                 job_id: str, log: Log, packages: list[str] | None = None, kind: str = "vm",
+                 services: list[dict] | None = None, stack: str = "") -> dict:
     packages = packages or []
+    services = services or []
     catalog = get_profiles(settings)
     labels = ", ".join(catalog.get(p, {}).get("label", p) for p in profiles) or "base only"
     log(f"Configuring {name} ({os_family}) with Ansible: {labels}"
         + (f"; packages: {', '.join(packages)}" if packages else ""))
     if not settings.live_mode:
-        return _mock_run(settings, name, os_family, profiles, log, packages)
+        return _mock_run(settings, name, os_family, profiles, log, packages, services)
 
-    inv_path = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id)
+    inv_path = inventory_for(settings, name=name, env=env, ip=ip, os_family=os_family, job_id=job_id, kind=kind)
     vars_path = os.path.join(os.path.dirname(inv_path), "vars.json")
     with open(vars_path, "w") as fh:
-        json.dump({"profiles": profiles, "packages": packages}, fh)
+        extra = {}
+        if services:
+            compose_yaml, secrets = compose_service.render(services)
+            extra = {"compose_yaml": compose_yaml, "stack_secrets": secrets, "stack_name": stack or name}
+        json.dump({"profiles": profiles, "packages": packages, **extra}, fh)
     env_vars = ansible_env(settings)
     cmd = ["ansible-playbook", "-i", inv_path, "-e", f"@{vars_path}", os.path.join(settings.ansible_dir, "site.yml")]
     log("$ " + " ".join(cmd))
@@ -125,11 +134,11 @@ def configure_vm(settings: Settings, *, name: str, env: str, ip: str, os_family:
     rc = proc.wait()
     if rc != 0:
         raise RuntimeError(f"ansible-playbook failed with exit code {rc}")
-    return {"profiles": profiles, "packages": packages}
+    return {"profiles": profiles, "packages": packages, "services": [x["name"] for x in services or []]}
 
 
 def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str], log: Log,
-              packages: list[str]) -> dict:
+              packages: list[str], services: list[dict] | None = None) -> dict:
     delay = 0.12 / max(settings.mock_speed, 0.01)
     base = {
         "linux": ["Wait until the VM accepts SSH", "Wait for cloud-init to finish", "Install base packages",
@@ -151,6 +160,9 @@ def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str]
     tasks = base + [t for p in profiles for t in per_profile.get(p, [f"{p} : main"])]
     if packages:
         tasks.append(f"Install extra packages ({', '.join(packages)})")
+    if services:
+        tasks += ["docker_services : Write compose.yaml", "docker_services : Generate missing secrets (kept on the host)",
+                  f"docker_services : docker compose up -d ({', '.join(s['name'] for s in services)})"]
     for task in tasks:
         time.sleep(delay)
         log(f"TASK [{task}] " + "*" * max(4, 50 - len(task)))
@@ -161,4 +173,4 @@ def _mock_run(settings: Settings, name: str, os_family: str, profiles: list[str]
     log("")
     log("PLAY RECAP " + "*" * 50)
     log(f"{name:<24} : ok={ok}    changed={changed}    unreachable=0    failed=0    skipped=0")
-    return {"profiles": profiles, "packages": packages}
+    return {"profiles": profiles, "packages": packages, "services": [x["name"] for x in services or []]}

@@ -165,8 +165,9 @@ def power(req: PowerRequest):
         raise HTTPException(404, f"VM '{req.name}' not found in {req.environment}")
     px = get_proxmox(get_settings())
     try:
-        (px.start_vm if req.action == "start" else px.stop_vm)(vm.vmid)
-        return {"name": req.name, "vmid": vm.vmid, **px.vm_status(vm.vmid)}
+        kind = vm.spec.get("kind", "vm")
+        (px.start_vm if req.action == "start" else px.stop_vm)(vm.vmid, kind)
+        return {"name": req.name, "vmid": vm.vmid, **px.vm_status(vm.vmid, kind)}
     except ProxmoxError as exc:
         raise HTTPException(502, str(exc)) from exc
 

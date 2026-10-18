@@ -54,7 +54,7 @@ resource "proxmox_storage_directory" "images" {
   count            = var.create_image_storage ? 1 : 0
   id               = var.image_storage_id
   path             = var.image_storage_path
-  content          = ["import", "iso", "snippets"]
+  content          = ["import", "iso", "snippets", "vztmpl"]
   nodes            = [var.node_name]
   create_base_path = true
 }

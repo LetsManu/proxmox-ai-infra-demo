@@ -12,3 +12,13 @@ output "vms" {
     }
   }
 }
+
+output "containers" {
+  description = "Deployed LXC containers with their IDs and IPv4 addresses."
+  value = {
+    for k, m in module.lxc : k => {
+      vm_id          = m.vm_id
+      ipv4_addresses = m.ipv4_addresses
+    }
+  }
+}

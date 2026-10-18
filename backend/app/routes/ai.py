@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..config import get_settings
-from ..schemas import GenerateSpecRequest, SummarizePlanRequest, TroubleshootRequest
+from ..schemas import GenerateSpecRequest, GenerateStackRequest, SummarizePlanRequest, TroubleshootRequest
 from ..services import ai_service
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
@@ -22,6 +22,15 @@ def generate_vm_spec(req: GenerateSpecRequest):
         return ai_service.generate_vm_spec(get_settings(), req.prompt)
     except ai_service.SpecRejected as exc:
         raise HTTPException(422, {"message": "Generated spec rejected by safety validation",
+                                  "errors": exc.errors, "draft": exc.spec}) from exc
+
+
+@router.post("/generate-stack")
+def generate_stack(req: GenerateStackRequest):
+    try:
+        return ai_service.generate_stack(get_settings(), req.prompt)
+    except ai_service.SpecRejected as exc:
+        raise HTTPException(422, {"message": "Drafted stack rejected by validation",
                                   "errors": exc.errors, "draft": exc.spec}) from exc
 
 

@@ -80,3 +80,15 @@ resource "proxmox_virtual_environment_vm" "template" {
     ignore_changes = [description]
   }
 }
+
+# LXC templates (vztmpl) for containers in the VM stacks.
+resource "proxmox_download_file" "ct" {
+  for_each = var.ct_templates
+
+  node_name    = var.node_name
+  datastore_id = var.ct_storage
+  content_type = "vztmpl"
+  url          = each.value.url
+  file_name    = each.value.file_name
+  overwrite    = false
+}

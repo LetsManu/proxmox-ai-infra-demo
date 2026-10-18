@@ -1,6 +1,10 @@
+- name: Detect LXC containers (no guest agent; Ansible connects as root with a key)
+  ansible.builtin.set_fact:
+    is_lxc: "{{ ansible_virtualization_type | default('') == 'lxc' }}"
+
 - name: Install base packages
   ansible.builtin.apt:
-    name: [qemu-guest-agent, unattended-upgrades, curl, ca-certificates, htop]
+    name: "{{ ['unattended-upgrades', 'curl', 'ca-certificates', 'htop'] + ([] if is_lxc else ['qemu-guest-agent']) }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
@@ -10,6 +14,7 @@
     name: qemu-guest-agent
     state: started
     enabled: true
+  when: not is_lxc
 
 - name: Enable automatic security updates
   ansible.builtin.copy:
@@ -30,7 +35,7 @@
     dest: /etc/ssh/sshd_config.d/10-infra-demo.conf
     content: |
       PasswordAuthentication no
-      PermitRootLogin no
+      PermitRootLogin {{ 'prohibit-password' if is_lxc else 'no' }}
       KbdInteractiveAuthentication no
     mode: "0644"
   notify: Restart ssh

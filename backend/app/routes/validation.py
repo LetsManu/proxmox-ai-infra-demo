@@ -17,6 +17,33 @@ from .plans import get_vm
 router = APIRouter(prefix="/api", tags=["validation"])
 
 
+def validate_member(ctx: JobContext, s, vm: VirtualMachine, env: str, *, simulate_failure: bool = False,
+                    port: int | None = None, path: str | None = None) -> dict:
+    """Platform checks + security baseline + application tests for one machine; records the verdict."""
+    kind = vm.spec.get("kind", "vm")
+    ctx.log(f"Validating {vm.name} ({'CT' if kind == 'lxc' else 'VMID'} {vm.vmid}) in {env.upper()}")
+    os_family = os_family_for(vm.spec.get("template", ""))
+    result = validate_vm(s, vmid=vm.vmid, env=env, health_check_port=port, health_check_path=path,
+                         simulate_failure=simulate_failure, log=ctx.log, os_family=os_family, kind=kind)
+    tests = test_service.run_suite(s, vm_name=vm.name, env=env, spec=vm.spec, os_family=os_family,
+                                   ip=result["ip_address"], job_id=ctx.job_id, log=ctx.log,
+                                   mock=not s.live_mode, fail=simulate_failure or s.mock_fail_validation)
+    for group, label in (("security_baseline", "Security baseline"), ("app_tests", "Application tests")):
+        result["checks"].append({"name": group, "ok": tests["summary"][group]["ok"],
+                                 "detail": f"{label}: {tests['summary'][group]['detail']}"})
+    result["tests"] = tests["results"]
+    result["tests_reviewed"] = tests["approved"]
+    current = get_vm(vm.name, env)
+    result = finish(result, config_status=current.config_status,
+                    profiles=(vm.spec.get("profiles") or []) + (vm.spec.get("packages") or []), log=ctx.log)
+    with session_scope() as db:
+        row = db.query(VirtualMachine).filter_by(name=vm.name, environment=env).one()
+        row.last_validation = result["overall"]
+        row.last_validation_at = datetime.now(timezone.utc)
+        row.ip_address = result["ip_address"]
+    return result
+
+
 @router.post("/vms/validate", response_model=JobCreated, status_code=202)
 def validate(req: ValidateRequest):
     s = get_settings()
@@ -27,28 +54,9 @@ def validate(req: ValidateRequest):
                         params=req.model_dump())
 
     def work(ctx: JobContext):
-        ctx.log(f"Validating {req.name} (VMID {vm.vmid}) in {req.environment.upper()}")
-        os_family = os_family_for(vm.spec.get("template", ""))
-        result = validate_vm(s, vmid=vm.vmid, env=req.environment, health_check_port=req.health_check_port,
-                             health_check_path=req.health_check_path, simulate_failure=req.simulate_failure,
-                             log=ctx.log, os_family=os_family)
-        tests = test_service.run_suite(s, vm_name=req.name, env=req.environment, spec=vm.spec, os_family=os_family,
-                                       ip=result["ip_address"], job_id=ctx.job_id, log=ctx.log,
-                                       mock=not s.live_mode, fail=req.simulate_failure or s.mock_fail_validation)
-        for group, label in (("security_baseline", "Security baseline"), ("app_tests", "Application tests")):
-            result["checks"].append({"name": group, "ok": tests["summary"][group]["ok"],
-                                     "detail": f"{label}: {tests['summary'][group]['detail']}"})
-        result["tests"] = tests["results"]
-        result["tests_reviewed"] = tests["approved"]
-        current = get_vm(req.name, req.environment)
-        result = finish(result, config_status=current.config_status,
-                        profiles=(vm.spec.get("profiles") or []) + (vm.spec.get("packages") or []), log=ctx.log)
+        result = validate_member(ctx, s, vm, req.environment, simulate_failure=req.simulate_failure,
+                                 port=req.health_check_port, path=req.health_check_path)
         ctx.update_result(validation=result, summary=f"Validation {result['overall']}")
-        with session_scope() as db:
-            row = db.query(VirtualMachine).filter_by(name=req.name, environment=req.environment).one()
-            row.last_validation = result["overall"]
-            row.last_validation_at = datetime.now(timezone.utc)
-            row.ip_address = result["ip_address"]
         if result["overall"] != "PASS":
             failed = ", ".join(c["name"] for c in result["checks"] if not c["ok"])
             ctx.log(f"Failed checks: {failed}. Use Diagnose in the Validation panel for guidance.")

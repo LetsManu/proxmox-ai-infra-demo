@@ -20,7 +20,8 @@ router = APIRouter(prefix="/api/platform", tags=["platform"])
 def platform_status():
     s = get_settings()
     out = platform_service.status(s)
-    out["declared_templates"] = sorted(platform_service.desired_templates(s)) if out["reachable"] else []
+    out["declared_templates"] = (sorted(platform_service.desired_templates(s))
+                                 + sorted(platform_service.desired_ct_templates(s))) if out["reachable"] else []
     return out
 
 
@@ -31,9 +32,10 @@ def platform_plan():
 
     def work(ctx: JobContext):
         templates = platform_service.desired_templates(s)
-        names = ", ".join(sorted(templates)) or "none"
+        cts = platform_service.desired_ct_templates(s)
+        names = ", ".join(sorted(templates) + sorted(cts)) or "none"
         ctx.log(f"Platform stack (infra/platform): templates declared: {names}")
-        plan = TerraformService(s).plan_platform(templates, ctx.job_id, ctx.log)
+        plan = TerraformService(s).plan_platform(templates, ctx.job_id, ctx.log, ct_templates=cts)
         ctx.update_result(plan=plan.to_dict(), summary=plan.summary_line, templates=sorted(templates))
         return plan.summary_line
 
