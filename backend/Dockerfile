@@ -1,5 +1,5 @@
 # Build context: repository root (see docker-compose.yml), so infra/ can be copied in.
-FROM python:3.13-slim
+FROM python:3.14-slim
 
 ARG TOFU_VERSION=1.12.7
 # Optional: set to e.g. 1.13.3 to also install HashiCorp Terraform (then IAC_BINARY=terraform).
