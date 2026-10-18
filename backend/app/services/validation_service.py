@@ -3,7 +3,7 @@
 Checks (all must pass, the health check only if requested):
   1. VM is running                          (Proxmox status/current)
   2. QEMU guest agent reports an IPv4       (agent/network-get-interfaces)
-  3. cloud-init completed                   (agent/file-read boot-finished)
+  3. cloud-init completed                   (agent/file-read boot-finished; Windows: get-osinfo + WinRM 5986)
   4. optional TCP service health check      (backend -> VM IP:port)
 """
 
@@ -19,6 +19,8 @@ from ..config import Settings
 from .proxmox_service import MockProxmox, ProxmoxError, get_proxmox
 
 Log = Callable[[str], None]
+
+WINRM_HTTPS_PORT = 5986
 
 
 def _check(name: str, ok: bool, detail: str) -> dict:
@@ -84,12 +86,18 @@ def validate_vm(settings: Settings, *, vmid: int, env: str, health_check_port: i
         checks.append(_check("cloud_init_completed", ready, "container up with network" if ready else
                              "container has no network or did not boot"))
     elif os_family == "windows":
-        log("[3/4] Waiting for Windows to finish setup (guest agent get-osinfo)")
+        # The agent answers minutes before cloudbase-init has set the password. cloudbase-init creates the
+        # WinRM HTTPS listener right after that (the template has none), so an open 5986 means "ready".
+        log("[3/4] Waiting for Windows to finish setup (guest agent, then WinRM HTTPS from cloudbase-init)")
         os_name = _poll(lambda: px.guest_os(vmid), timeout, interval) if running else None
         if mock and (simulate_failure or settings.mock_fail_validation):
             os_name = None
-        checks.append(_check("cloud_init_completed", bool(os_name),
-                             os_name or "Windows setup not finished (no OS info from the guest agent)"))
+        winrm = bool(os_name) and (mock or bool(ip and _poll(lambda: _service_check(ip, WINRM_HTTPS_PORT, None)[0],
+                                                             timeout, interval)))
+        detail = (f"{os_name}, WinRM HTTPS {WINRM_HTTPS_PORT} open" if winrm else
+                  f"{os_name}, but WinRM HTTPS {WINRM_HTTPS_PORT} is not open (cloudbase-init not finished?)" if os_name
+                  else "Windows setup not finished (no OS info from the guest agent)")
+        checks.append(_check("cloud_init_completed", winrm, detail))
     else:
         log("[3/4] Waiting for cloud-init to finish (/var/lib/cloud/instance/boot-finished)")
         ci_done = bool(running and _poll(lambda: px.cloud_init_done(vmid), timeout, interval))
