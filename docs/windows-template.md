@@ -28,7 +28,7 @@ Expected result: a Proxmox template with VMID `TEMPLATE_WINDOWS_2022_ID` (defaul
 3. Install Windows; load the `vioscsi` driver from the VirtIO ISO when the installer asks for a disk.
 4. In Windows (PowerShell as Administrator):
    ```powershell
-   # VirtIO drivers + QEMU guest agent
+   # VirtIO drivers + QEMU guest agent (D: = the VirtIO ISO; check the letter with Get-Volume)
    Start-Process msiexec -Wait -ArgumentList '/i D:\virtio-win-gt-x64.msi /qn'
    Start-Process msiexec -Wait -ArgumentList '/i D:\guest-agent\qemu-ga-x86_64.msi /qn'
 
@@ -36,11 +36,24 @@ Expected result: a Proxmox template with VMID `TEMPLATE_WINDOWS_2022_ID` (defaul
    Invoke-WebRequest https://cloudbase.it/downloads/CloudbaseInitSetup_Stable_x64.msi -OutFile C:\cbi.msi
    Start-Process msiexec -Wait -ArgumentList '/i C:\cbi.msi /qn LOGGINGSERIALPORTNAME=COM1 USERNAME=Administrator'
 
-   # WinRM over HTTPS for Ansible (self-signed; pin a CA certificate in production)
-   $cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My
-   winrm create winrm/config/Listener?Address=*+Transport=HTTPS "@{Hostname=`"$env:COMPUTERNAME`";CertificateThumbprint=`"$($cert.Thumbprint)`"}"
+   # WinRM over HTTPS for Ansible: only open the port here. The certificate is created per clone on
+   # first boot (below); a certificate made now would be copied into every clone with the same private key.
    New-NetFirewallRule -Name winrm-https -DisplayName 'WinRM HTTPS' -Protocol TCP -LocalPort 5986 -Action Allow
    ```
+   Save this as `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\LocalScripts\winrm-https.ps1`. cloudbase-init runs
+   it as SYSTEM on the first boot of every clone; it creates a certificate for that machine, the HTTPS listener, and
+   removes the unencrypted HTTP listener (5985) that Windows Server enables by default:
+   ```powershell
+   $marker = 'C:\ProgramData\winrm-https.done'
+   if (Test-Path $marker) { exit 0 }
+   Get-ChildItem WSMan:\localhost\Listener | Where-Object { $_.Keys -match 'Transport=HTTPS?$' } | Remove-Item -Recurse -Force
+   Get-ChildItem Cert:\LocalMachine\My | Where-Object FriendlyName -eq 'winrm-https' | Remove-Item
+   $cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My -FriendlyName winrm-https
+   New-Item WSMan:\localhost\Listener -Transport HTTPS -Address * -CertificateThumbPrint $cert.Thumbprint -Force | Out-Null
+   New-Item $marker -ItemType File | Out-Null
+   ```
+   The certificate is self-signed, so Ansible does not validate it (`group_vars/windows.yml`); use a CA-issued
+   certificate (e.g. AD CS auto-enrollment) in production and set `ansible_winrm_server_cert_validation: validate`.
    In `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf` and `cloudbase-init-unattend.conf`
    set `metadata_services=cloudbaseinit.metadata.services.configdrive.ConfigDriveService` and keep
    `inject_user_password=true` so the password from Proxmox (cloud-init `cipassword`) is applied.
