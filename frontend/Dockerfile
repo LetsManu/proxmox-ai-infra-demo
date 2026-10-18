@@ -6,7 +6,7 @@ COPY . .
 RUN npm run build
 
 # Runs as uid 101 on port 8080, so it works with read_only + cap_drop ALL.
-FROM nginxinc/nginx-unprivileged:1.29-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /src/dist /usr/share/nginx/html
 EXPOSE 8080
