@@ -1,11 +1,15 @@
-# Release: push a tag vX.Y.Z (or vX.Y.Z-rc.N for a release candidate).
-#   1. full CI on the tagged commit
+# Release: push a tag vX.Y.Z (or vX.Y.Z-rc.N for a release candidate), or run it from the Actions tab on main
+# with the version (e.g. 2.1.0-rc.1): then the tag is created on that commit at the very end.
+#   1. full CI on the commit
 #   2. backend and frontend images to ghcr.io (with SBOM and provenance), tag X.Y.Z[-rc.N]; "latest" for final releases
 #   3. GitHub release with the install archive (scripts/install.sh inside) and its SHA-256
 # Only GitHub's own tooling is used (docker, gh), so there is no third-party action to pin.
 name: Release
 on:
   push: { tags: ["v*"] }
+  workflow_dispatch:
+    inputs:
+      version: { description: "Version without v, e.g. 2.1.0-rc.1 (creates tag v<version> on this commit)", required: true }
 permissions: { contents: read }
 
 concurrency:
@@ -21,18 +25,27 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: v
         name: Tag matches the code
+        env: { INPUT_VERSION: "${{ inputs.version }}" }
         run: |
-          tag="${GITHUB_REF_NAME}"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "Run the release from main"; exit 1; }
+            tag="v${INPUT_VERSION#v}"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then echo "Tag $tag exists already"; exit 1; fi
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
           [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-rc\.[0-9]+)?$ ]] || { echo "Tag $tag is not vX.Y.Z or vX.Y.Z-rc.N"; exit 1; }
           base="${BASH_REMATCH[1]}"
           code=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/app/__init__.py)
           [ "$code" = "$base" ] || { echo "Tag $tag but backend/app/__init__.py says $code"; exit 1; }
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "prerelease=$([ -n "${BASH_REMATCH[2]}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   images:
@@ -69,6 +82,7 @@ jobs:
     permissions: { contents: write }
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -95,5 +109,7 @@ jobs:
         run: |
           pre=""
           [ "${{ needs.version.outputs.prerelease }}" = true ] && pre="--prerelease"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "v$VERSION" --notes-file notes.md $pre \
+          # manual run: GitHub creates the tag on the commit that CI tested and the images were built from
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then where=(--target "$GITHUB_SHA"); else where=(--verify-tag); fi
+          gh release create "$TAG" "${where[@]}" --title "$TAG" --notes-file notes.md $pre \
             "proxmox-ai-infra-$VERSION.tar.gz" "proxmox-ai-infra-$VERSION.tar.gz.sha256"
