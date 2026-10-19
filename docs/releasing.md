@@ -2,8 +2,8 @@
 
 Releases are on the GitHub releases page of the repository. Each one has an install archive
 (`proxmox-ai-infra-<version>.tar.gz` with `scripts/install.sh`), its SHA-256, and from 2.1.0 on the container images on
-`ghcr.io`. From 2.1.0-rc.2 on a release also has the Proxmox appliance disk
-(`proxmox-ai-infra-appliance-<version>.qcow2`, [appliance.md](appliance.md)) and `import-to-proxmox.sh`.
+`ghcr.io`. The Proxmox appliance disk has its own releases, tagged `appliance-v<version>`
+([appliance.md](appliance.md)).
 
 | Version | Content | Images |
 |---|---|---|
@@ -26,9 +26,21 @@ Releases are on the GitHub releases page of the repository. Each one has an inst
    2. checks the version against the code and that the tag does not exist yet,
    3. builds and pushes `backend` and `frontend` to `ghcr.io/<owner>/proxmox-ai-infra-demo/…:<version>` with SBOM and
       provenance (`latest` only for a final release),
-   4. builds the appliance disk from those images (`appliance/build.sh`, KVM on the runner; fails above 2 GB),
-   5. creates the tag `v<version>` on exactly that commit and the GitHub release with the install archive, the
-      appliance disk, `import-to-proxmox.sh`, their SHA-256 sums and the changelog section.
+   4. creates the tag `v<version>` on exactly that commit and the GitHub release with the install archive, its
+      SHA-256 and the changelog section.
+
+### Appliance releases
+
+The Proxmox VM disk is released separately, so it can follow its own rhythm (OS updates, appliance fixes) without a
+new console version:
+
+1. GitHub → **Actions → Appliance release → Run workflow** on `main`, with the **console** version to ship (an
+   existing console release, e.g. `2.1.0-rc.1`) and the **appliance** version (e.g. `1.0.0-rc.1`).
+2. The workflow (`.github/workflows/appliance-release.yml`) checks that `backend/`, `frontend/` and `infra/` are
+   unchanged since that console tag (so the code in the disk matches its images), pulls that version's images,
+   builds the disk with `appliance/build.sh` (KVM on the runner, fails above 2 GB) and creates the release
+   `appliance-v<version>` with the disk, `import-to-proxmox.sh` and SHA-256 sums. It is never marked *latest*;
+   a release candidate on either side makes it a pre-release.
 
 Pushing a tag `vX.Y.Z` yourself also starts the workflow (the tag must then point at a commit on `main`).
 

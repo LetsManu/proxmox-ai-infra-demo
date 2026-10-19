@@ -21,7 +21,7 @@ Sign-in with your directory, and releases that install in a few minutes.
 - One version number in backend, frontend and changelog, checked in CI; shown in the UI footer.
 
 **Proxmox appliance** ([docs/appliance.md](docs/appliance.md))
-- Each release also ships `proxmox-ai-infra-appliance-<version>.qcow2`: Debian 12 with Docker, the console and its images, ready to import. `import-to-proxmox.sh` creates the VM on the node (VirtIO SCSI, guest agent, cloud-init user/SSH key/IP); `sudo pac-setup` on the VM configures Proxmox and sign-in.
+- Separate appliance releases (`appliance-v<version>`, *Actions → Appliance release*) ship `proxmox-ai-infra-appliance-<version>.qcow2`: Debian 12 with Docker, a console release and its images, ready to import. `import-to-proxmox.sh` creates the VM on the node (VirtIO SCSI, guest agent, cloud-init user/SSH key/IP); `sudo pac-setup` on the VM configures Proxmox and sign-in.
 - Nothing is published on the network until sign-in is configured; then Caddy serves HTTPS (internal CA by default, your own certificate via `CONSOLE_TLS`).
 - Daily backup by cron, unattended security updates, SSH host keys and machine ID regenerated per VM.
 

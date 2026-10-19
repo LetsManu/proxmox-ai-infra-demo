@@ -1,0 +1,81 @@
+# Appliance release: a Proxmox VM disk with a released console version (docs/appliance.md).
+# Run from the Actions tab on main with
+#   console:   the console release to ship, e.g. 2.1.0-rc.1 (its images on ghcr.io are used)
+#   appliance: the appliance version, e.g. 1.0.0 or 1.0.0-rc.1 (tag appliance-v<version>)
+# The appliance scripts come from main; backend, frontend and infra must be unchanged since the console tag,
+# so the code in the disk matches the images. The release is never marked "latest" (console releases are).
+name: Appliance release
+on:
+  workflow_dispatch:
+    inputs:
+      console: { description: "Console version to ship, e.g. 2.1.0-rc.1", required: true }
+      appliance: { description: "Appliance version, e.g. 1.0.0-rc.1", required: true }
+permissions: { contents: read }
+
+concurrency:
+  group: appliance-release
+  cancel-in-progress: false
+
+jobs:
+  appliance:
+    runs-on: ubuntu-latest
+    permissions: { contents: write, packages: read }
+    env:
+      CONSOLE: ${{ inputs.console }}
+      APPLIANCE: ${{ inputs.appliance }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/proxmox-ai-infra-demo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { fetch-depth: 0 }
+      - name: Check inputs
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "Run it from main"; exit 1; }
+          re='^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
+          [[ "$CONSOLE" =~ $re ]] && [[ "$APPLIANCE" =~ $re ]] || { echo "Versions must be X.Y.Z or X.Y.Z-rc.N"; exit 1; }
+          git fetch -q --tags
+          git rev-parse -q --verify "refs/tags/v$CONSOLE" >/dev/null || { echo "No console release v$CONSOLE"; exit 1; }
+          if git rev-parse -q --verify "refs/tags/appliance-v$APPLIANCE" >/dev/null; then echo "appliance-v$APPLIANCE exists"; exit 1; fi
+          git diff --quiet "v$CONSOLE" HEAD -- backend frontend infra || {
+            echo "backend/frontend/infra changed since v$CONSOLE: release a new console version first"
+            git diff --stat "v$CONSOLE" HEAD -- backend frontend infra; exit 1; }
+          echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> "$GITHUB_ENV"
+      - name: Tools and KVM
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q qemu-system-x86 qemu-utils xorriso
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Images of v${{ inputs.console }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for svc in backend frontend; do docker pull -q "$IMAGE_REGISTRY/$svc:$CONSOLE"; done
+          docker pull -q caddy:2.10.2-alpine
+      - name: Build the disk
+        run: |
+          name="proxmox-ai-infra-appliance-$APPLIANCE"
+          appliance/build.sh "$CONSOLE" "$name.qcow2"
+          size=$(stat -c %s "$name.qcow2")
+          [ "$size" -lt 2000000000 ] || { echo "Disk is $size bytes, over the 2 GB release asset limit"; exit 1; }
+          sha256sum "$name.qcow2" > "$name.qcow2.sha256"
+          cp appliance/import-to-proxmox.sh .
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - name: GitHub release
+        run: |
+          cat > notes.md <<EOF
+          Proxmox VM disk with **console v$CONSOLE** (Debian 12, Docker, backend, frontend, Caddy for HTTPS).
+          Console changes: see the [v$CONSOLE release](https://github.com/$GITHUB_REPOSITORY/releases/tag/v$CONSOLE).
+
+          ## Install on the Proxmox node
+
+          \`\`\`bash
+          sha256sum -c $NAME.qcow2.sha256
+          ./import-to-proxmox.sh --image $NAME.qcow2 --ssh-key ~/.ssh/id_ed25519.pub --start
+          ssh admin@<vm-ip>      # then: sudo pac-setup
+          \`\`\`
+
+          Until sign-in is configured nothing is published on the network. Details: docs/appliance.md.
+          EOF
+          pre=""; [[ "$CONSOLE$APPLIANCE" == *-rc.* ]] && pre="--prerelease"
+          gh release create "appliance-v$APPLIANCE" --target "$GITHUB_SHA" --latest=false $pre \
+            --title "Appliance $APPLIANCE (console $CONSOLE)" --notes-file notes.md \
+            "$NAME.qcow2" "$NAME.qcow2.sha256" import-to-proxmox.sh

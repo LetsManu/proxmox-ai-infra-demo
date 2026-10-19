@@ -134,8 +134,8 @@ uid 10001), pulls the release images and starts the console. That covers steps 7
 anyway for the settings it does not ask (storage, VLANs, SSH key). The images are on `ghcr.io`; for a private
 repository run `docker login ghcr.io` with a token that has `read:packages` first.
 
-**Appliance VM** (no console host to prepare): import `proxmox-ai-infra-appliance-<version>.qcow2` from the same
-release page on the Proxmox node and run `sudo pac-setup` in the VM ([docs/appliance.md](docs/appliance.md)). The
+**Appliance VM** (no console host to prepare): import `proxmox-ai-infra-appliance-<version>.qcow2` from an
+`appliance-v…` release on the Proxmox node and run `sudo pac-setup` in the VM ([docs/appliance.md](docs/appliance.md)). The
 console host is then this VM; continue with step 5.
 
 **Git checkout** (to change the code):

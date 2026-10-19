@@ -1,8 +1,8 @@
 # Proxmox appliance (VM disk)
 
-Each release from 2.1.0 on also has a ready-made VM disk: `proxmox-ai-infra-appliance-<version>.qcow2`. It is the
-official Debian 12 cloud image with Docker, the console (frontend and backend) of that version, its container images
-and Caddy for HTTPS. Import it on the Proxmox node, start it, run `sudo pac-setup` once, done. No registry access or
+The appliance has its own releases on the releases page, tagged `appliance-v<version>` (title *Appliance X (console
+Y)*). Each has a ready-made VM disk `proxmox-ai-infra-appliance-<version>.qcow2`: the official Debian 12 cloud image
+with Docker, one console release (frontend and backend) with its container images, and Caddy for HTTPS. Import it on the Proxmox node, start it, run `sudo pac-setup` once, done. No registry access or
 Docker knowledge needed.
 
 | | |
@@ -86,7 +86,8 @@ A Proxmox snapshot before `pac-setup` changes or upgrades is a cheap way back.
 
 ## How the disk is built
 
-`appliance/build.sh <version> <out.qcow2>` (run by the release workflow): downloads the Debian 12 generic cloud image
+`appliance/build.sh <console-version> <out.qcow2>` (run by the *Appliance release* workflow, see
+[releasing.md](releasing.md#appliance-releases)): downloads the Debian 12 generic cloud image
 and checks it against Debian's `SHA512SUMS`, boots it once in QEMU with a cloud-init seed that runs
 `appliance/provision.sh` (Docker from Docker's apt repository, `docker load` of the images, the console under
 `/opt/proxmox-ai-infra`, the systemd service, cron backup), then seals it: SSH host keys, machine ID and cloud-init
