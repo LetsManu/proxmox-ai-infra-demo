@@ -1,0 +1,26 @@
+# Delete a GitHub release and its tag (e.g. a superseded release candidate). Run from the Actions tab.
+# Images on ghcr.io are not touched. Type the tag twice; nothing happens if they differ.
+name: Delete release
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Tag of the release to delete, e.g. appliance-v1.0.0-rc.1", required: true }
+      confirm: { description: "Type the tag again to confirm", required: true }
+permissions: { contents: read }
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    env:
+      TAG: ${{ inputs.tag }}
+      CONFIRM: ${{ inputs.confirm }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete
+        run: |
+          [ -n "$TAG" ] && [ "$TAG" = "$CONFIRM" ] || { echo "Tag and confirmation differ"; exit 1; }
+          gh release view "$TAG" --json name,tagName,isPrerelease
+          gh release delete "$TAG" --yes --cleanup-tag
+          echo "Deleted release and tag $TAG"

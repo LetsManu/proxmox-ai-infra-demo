@@ -1,8 +1,10 @@
 # Proxmox appliance (VM disk)
 
-The appliance has its own releases on the releases page, tagged `appliance-v<version>` (title *Appliance X (console
-Y)*). Each has a ready-made VM disk `proxmox-ai-infra-appliance-<version>.qcow2`: the official Debian 12 cloud image
-with Docker, one console release (frontend and backend) with its container images, and Caddy for HTTPS. Import it on the Proxmox node, start it, run `sudo pac-setup` once, done. No registry access or
+The appliance has its own releases on the releases page, with the same version number as the console it contains:
+`appliance-v2.1.0-rc.1` carries console `v2.1.0-rc.1` (a rebuild of the same version, e.g. for OS updates, is
+`appliance-v<version>-r2`). Each has a ready-made VM disk `proxmox-ai-infra-appliance-<version>.qcow2`: the official
+Debian 12 cloud image with Docker, that console release (frontend and backend) with its container images, and Caddy
+for HTTPS. Import it on the Proxmox node, start it, run `sudo pac-setup` once, done. No registry access or
 Docker knowledge needed.
 
 | | |

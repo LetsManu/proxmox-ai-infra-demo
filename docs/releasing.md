@@ -2,14 +2,14 @@
 
 Releases are on the GitHub releases page of the repository. Each one has an install archive
 (`proxmox-ai-infra-<version>.tar.gz` with `scripts/install.sh`), its SHA-256, and from 2.1.0 on the container images on
-`ghcr.io`. The Proxmox appliance disk has its own releases, tagged `appliance-v<version>`
-([appliance.md](appliance.md)).
+`ghcr.io`. The Proxmox appliance disk has its own releases with the same version number, tagged
+`appliance-v<version>` ([appliance.md](appliance.md)).
 
 | Version | Content | Images |
 |---|---|---|
 | `v2.1.0-rc.1` | Sign-in (OIDC, LDAP), roles, install/upgrade/backup scripts | `ghcr.io/letsmanu/proxmox-ai-infra-demo/{backend,frontend}:2.1.0-rc.1` |
 | `v2.0.3` | Windows Server verification and fixes | none (source release, build locally) |
-| `appliance-v1.0.0-rc.1` | Proxmox VM disk with console 2.1.0-rc.1 ([appliance.md](appliance.md)) | included in the disk |
+| `appliance-v2.1.0-rc.1` | Proxmox VM disk with console 2.1.0-rc.1 ([appliance.md](appliance.md)) | included in the disk |
 
 ## Versions
 
@@ -35,13 +35,19 @@ Releases are on the GitHub releases page of the repository. Each one has an inst
 The Proxmox VM disk is released separately, so it can follow its own rhythm (OS updates, appliance fixes) without a
 new console version:
 
-1. GitHub → **Actions → Appliance release → Run workflow** on `main`, with the **console** version to ship (an
-   existing console release, e.g. `2.1.0-rc.1`) and the **appliance** version (e.g. `1.0.0-rc.1`).
+1. GitHub → **Actions → Appliance release → Run workflow** on `main`, with the **version**: an existing console
+   release, e.g. `2.1.0-rc.1`. The appliance gets the same version. **Revision** stays empty; set `2`, `3`, … only to
+   rebuild the disk of a version that already has one (OS updates, appliance fixes): `appliance-v<version>-r2`.
 2. The workflow (`.github/workflows/appliance-release.yml`) checks that `backend/`, `frontend/` and `infra/` are
    unchanged since that console tag (so the code in the disk matches its images), pulls that version's images,
    builds the disk with `appliance/build.sh` (KVM on the runner, fails above 2 GB) and creates the release
    `appliance-v<version>` with the disk, `import-to-proxmox.sh` and SHA-256 sums. It is never marked *latest*;
-   a release candidate on either side makes it a pre-release.
+   for a release candidate it is a pre-release.
+
+### Deleting a release
+
+**Actions → Delete release → Run workflow** with the tag, typed twice (e.g. a superseded release candidate). It
+deletes the GitHub release and its tag; images on ghcr.io stay.
 
 Pushing a tag `vX.Y.Z` yourself also starts the workflow (the tag must then point at a commit on `main`).
 

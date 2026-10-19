@@ -1,15 +1,17 @@
 # Appliance release: a Proxmox VM disk with a released console version (docs/appliance.md).
 # Run from the Actions tab on main with
-#   console:   the console release to ship, e.g. 2.1.0-rc.1 (its images on ghcr.io are used)
-#   appliance: the appliance version, e.g. 1.0.0 or 1.0.0-rc.1 (tag appliance-v<version>)
+#   version:   the console release to ship, e.g. 2.1.0-rc.1 (its images on ghcr.io are used). The appliance carries
+#              the same version: tag appliance-v<version>.
+#   revision:  only to rebuild the disk for a version that already has one (OS updates, appliance fixes),
+#              e.g. 2 -> appliance-v<version>-r2
 # The appliance scripts come from main; backend, frontend and infra must be unchanged since the console tag,
 # so the code in the disk matches the images. The release is never marked "latest" (console releases are).
 name: Appliance release
 on:
   workflow_dispatch:
     inputs:
-      console: { description: "Console version to ship, e.g. 2.1.0-rc.1", required: true }
-      appliance: { description: "Appliance version, e.g. 1.0.0-rc.1", required: true }
+      version: { description: "Console version to ship (= appliance version), e.g. 2.1.0-rc.1", required: true }
+      revision: { description: "Rebuild of the same version: 2, 3, ... (empty for the first build)", required: false, default: "" }
 permissions: { contents: read }
 
 concurrency:
@@ -21,8 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: write, packages: read }
     env:
-      CONSOLE: ${{ inputs.console }}
-      APPLIANCE: ${{ inputs.appliance }}
+      CONSOLE: ${{ inputs.version }}
+      REVISION: ${{ inputs.revision }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}/proxmox-ai-infra-demo
     steps:
@@ -31,8 +33,10 @@ jobs:
       - name: Check inputs
         run: |
           [ "$GITHUB_REF" = refs/heads/main ] || { echo "Run it from main"; exit 1; }
-          re='^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
-          [[ "$CONSOLE" =~ $re ]] && [[ "$APPLIANCE" =~ $re ]] || { echo "Versions must be X.Y.Z or X.Y.Z-rc.N"; exit 1; }
+          [[ "$CONSOLE" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "Version must be X.Y.Z or X.Y.Z-rc.N"; exit 1; }
+          [[ "$REVISION" =~ ^([2-9]|[1-9][0-9]+)?$ ]] || { echo "Revision must be empty or a number from 2"; exit 1; }
+          APPLIANCE="$CONSOLE${REVISION:+-r$REVISION}"
+          echo "APPLIANCE=$APPLIANCE" >> "$GITHUB_ENV"
           git fetch -q --tags
           git rev-parse -q --verify "refs/tags/v$CONSOLE" >/dev/null || { echo "No console release v$CONSOLE"; exit 1; }
           if git rev-parse -q --verify "refs/tags/appliance-v$APPLIANCE" >/dev/null; then echo "appliance-v$APPLIANCE exists"; exit 1; fi
@@ -45,7 +49,7 @@ jobs:
           sudo apt-get update -q && sudo apt-get install -y -q qemu-system-x86 qemu-utils xorriso
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
-      - name: Images of v${{ inputs.console }}
+      - name: Images of v${{ inputs.version }}
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           for svc in backend frontend; do docker pull -q "$IMAGE_REGISTRY/$svc:$CONSOLE"; done
@@ -75,7 +79,7 @@ jobs:
 
           Until sign-in is configured nothing is published on the network. Details: docs/appliance.md.
           EOF
-          pre=""; [[ "$CONSOLE$APPLIANCE" == *-rc.* ]] && pre="--prerelease"
+          pre=""; [[ "$CONSOLE" == *-rc.* ]] && pre="--prerelease"
           gh release create "appliance-v$APPLIANCE" --target "$GITHUB_SHA" --latest=false $pre \
-            --title "Appliance $APPLIANCE (console $CONSOLE)" --notes-file notes.md \
+            --title "Appliance v$APPLIANCE" --notes-file notes.md \
             "$NAME.qcow2" "$NAME.qcow2.sha256" import-to-proxmox.sh
