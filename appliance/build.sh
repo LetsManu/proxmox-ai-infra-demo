@@ -18,10 +18,10 @@ BASE_URL=https://cloud.debian.org/images/cloud/bookworm/latest
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 log() { printf '\033[1m%s\033[0m\n' "$*"; }
 
-log "Debian 12 cloud image"
-curl -fsSL -o "$WORK/base.qcow2" "$BASE_URL/debian-12-genericcloud-amd64.qcow2"
+log "Debian 12 cloud image (generic: full kernel, works with IDE/SATA cloud-init drives)"
+curl -fsSL -o "$WORK/base.qcow2" "$BASE_URL/debian-12-generic-amd64.qcow2"
 curl -fsSL -o "$WORK/SHA512SUMS" "$BASE_URL/SHA512SUMS"
-(cd "$WORK" && grep ' debian-12-genericcloud-amd64.qcow2$' SHA512SUMS | sed 's/debian-12-genericcloud-amd64.qcow2$/base.qcow2/' | sha512sum -c -)
+(cd "$WORK" && grep ' debian-12-generic-amd64.qcow2$' SHA512SUMS | sed 's/debian-12-generic-amd64.qcow2$/base.qcow2/' | sha512sum -c -)
 qemu-img create -q -f qcow2 -F qcow2 -b "$WORK/base.qcow2" "$WORK/disk.qcow2" 16G
 
 log "Console $VERSION and images"
