@@ -15,6 +15,7 @@ die()  { printf '\033[31mError: %s\033[0m\n' "$*" >&2; exit 1; }
 dc() {
   local files=(-f docker-compose.yml)
   [ -d secrets ] && files+=(-f docker-compose.secrets.yml)
+  [ -f .appliance ] && files+=(-f docker-compose.appliance.yml)  # VM appliance: Caddy for HTTPS
   docker compose "${files[@]}" "$@"
 }
 
@@ -34,6 +35,9 @@ env_set() {
 }
 
 env_get() { sed -n "s/^$1=//p" .env 2>/dev/null | tail -1; }
+
+# first non-loopback IPv4 of this machine (appliance default for PUBLIC_URL)
+primary_ip() { hostname -I 2>/dev/null | tr ' ' '\n' | grep -m1 -E '^[0-9]+\.' || echo localhost; }
 
 ensure_secret_files() {
   [ -d secrets ] || { mkdir -p secrets && chmod 700 secrets; }

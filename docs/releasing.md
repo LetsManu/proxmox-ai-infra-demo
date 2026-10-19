@@ -2,7 +2,8 @@
 
 Releases are on the GitHub releases page of the repository. Each one has an install archive
 (`proxmox-ai-infra-<version>.tar.gz` with `scripts/install.sh`), its SHA-256, and from 2.1.0 on the container images on
-`ghcr.io`.
+`ghcr.io`. From 2.1.0-rc.2 on a release also has the Proxmox appliance disk
+(`proxmox-ai-infra-appliance-<version>.qcow2`, [appliance.md](appliance.md)) and `import-to-proxmox.sh`.
 
 | Version | Content | Images |
 |---|---|---|
@@ -25,8 +26,9 @@ Releases are on the GitHub releases page of the repository. Each one has an inst
    2. checks the version against the code and that the tag does not exist yet,
    3. builds and pushes `backend` and `frontend` to `ghcr.io/<owner>/proxmox-ai-infra-demo/…:<version>` with SBOM and
       provenance (`latest` only for a final release),
-   4. creates the tag `v<version>` on exactly that commit and the GitHub release with the install archive, its
-      SHA-256 and the changelog section.
+   4. builds the appliance disk from those images (`appliance/build.sh`, KVM on the runner; fails above 2 GB),
+   5. creates the tag `v<version>` on exactly that commit and the GitHub release with the install archive, the
+      appliance disk, `import-to-proxmox.sh`, their SHA-256 sums and the changelog section.
 
 Pushing a tag `vX.Y.Z` yourself also starts the workflow (the tag must then point at a commit on `main`).
 

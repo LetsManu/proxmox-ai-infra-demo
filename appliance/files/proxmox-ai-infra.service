@@ -1,0 +1,16 @@
+[Unit]
+Description=Proxmox AI Infra Console (docker compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/proxmox-ai-infra
+ExecStart=/opt/proxmox-ai-infra/appliance/start.sh
+ExecStop=/usr/bin/bash -c '. scripts/lib.sh && dc stop'
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

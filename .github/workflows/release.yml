@@ -2,7 +2,8 @@
 # with the version (e.g. 2.1.0-rc.1): then the tag is created on that commit at the very end.
 #   1. full CI on the commit
 #   2. backend and frontend images to ghcr.io (with SBOM and provenance), tag X.Y.Z[-rc.N]; "latest" for final releases
-#   3. GitHub release with the install archive (scripts/install.sh inside) and its SHA-256
+#   3. the Proxmox appliance disk (appliance/build.sh: Debian 12 + Docker + this version's images)
+#   4. GitHub release with the install archive (scripts/install.sh inside), the appliance disk and SHA-256 sums
 # Only GitHub's own tooling is used (docker, gh), so there is no third-party action to pin.
 name: Release
 on:
@@ -79,7 +80,7 @@ jobs:
   publish:
     needs: [images, version]
     runs-on: ubuntu-latest
-    permissions: { contents: write }
+    permissions: { contents: write, packages: read }
     env:
       VERSION: ${{ needs.version.outputs.version }}
       TAG: ${{ needs.version.outputs.tag }}
@@ -104,7 +105,34 @@ jobs:
           \`\`\`
 
           Upgrade an existing installation: extract over it, then \`scripts/upgrade.sh\`. Images: \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/proxmox-ai-infra-demo/{backend,frontend}:$VERSION\`.
+
+          ## Proxmox appliance
+
+          \`proxmox-ai-infra-appliance-$VERSION.qcow2\`: Debian 12 with Docker and this version, ready to import. On the Proxmox node:
+
+          \`\`\`bash
+          ./import-to-proxmox.sh --image proxmox-ai-infra-appliance-$VERSION.qcow2 --ssh-key ~/.ssh/id_ed25519.pub --start
+          ssh admin@<vm-ip>   # then: sudo pac-setup
+          \`\`\`
+
+          Details: docs/appliance.md.
           EOF
+      - name: Appliance disk
+        env: { IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}/proxmox-ai-infra-demo" }
+        run: |
+          IMAGE_REGISTRY=$(echo "$IMAGE_REGISTRY" | tr '[:upper:]' '[:lower:]')
+          sudo apt-get update -q && sudo apt-get install -y -q qemu-system-x86 qemu-utils xorriso
+          # hardware acceleration on GitHub-hosted runners
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for svc in backend frontend; do docker pull -q "$IMAGE_REGISTRY/$svc:$VERSION"; done
+          docker pull -q caddy:2.10.2-alpine
+          IMAGE_REGISTRY="$IMAGE_REGISTRY" appliance/build.sh "$VERSION" "proxmox-ai-infra-appliance-$VERSION.qcow2"
+          size=$(stat -c %s "proxmox-ai-infra-appliance-$VERSION.qcow2")
+          [ "$size" -lt 2000000000 ] || { echo "Appliance disk is $size bytes, over the 2 GB release asset limit"; exit 1; }
+          sha256sum "proxmox-ai-infra-appliance-$VERSION.qcow2" > "proxmox-ai-infra-appliance-$VERSION.qcow2.sha256"
+          cp appliance/import-to-proxmox.sh .
       - name: GitHub release
         run: |
           pre=""
@@ -112,4 +140,6 @@ jobs:
           # manual run: GitHub creates the tag on the commit that CI tested and the images were built from
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then where=(--target "$GITHUB_SHA"); else where=(--verify-tag); fi
           gh release create "$TAG" "${where[@]}" --title "$TAG" --notes-file notes.md $pre \
-            "proxmox-ai-infra-$VERSION.tar.gz" "proxmox-ai-infra-$VERSION.tar.gz.sha256"
+            "proxmox-ai-infra-$VERSION.tar.gz" "proxmox-ai-infra-$VERSION.tar.gz.sha256" \
+            "proxmox-ai-infra-appliance-$VERSION.qcow2" "proxmox-ai-infra-appliance-$VERSION.qcow2.sha256" \
+            import-to-proxmox.sh

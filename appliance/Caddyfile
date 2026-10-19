@@ -1,0 +1,13 @@
+# HTTPS for the console appliance. PUBLIC_HOST comes from PUBLIC_URL (pac-setup).
+# Default certificate: Caddy's own CA ("tls internal"; its root is in the caddy-data volume).
+# Your own certificate: put console.crt/console.key into certs/ and set
+#   CONSOLE_TLS=/certs/console.crt /certs/console.key   in .env
+{
+	admin off
+}
+
+{$PUBLIC_HOST} {
+	tls {$CONSOLE_TLS}
+	encode zstd gzip
+	reverse_proxy frontend:8080
+}

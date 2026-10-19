@@ -4,17 +4,19 @@
 # Asks for the few values every installation needs, creates .env and secrets/ with the right permissions,
 # pulls the release images and starts the console. Re-running it keeps existing .env values and secrets.
 #   --build            build the images from this checkout instead of pulling them
+#   --offline          use the images already loaded (VM appliance), do not pull
 #   --non-interactive  take answers from the environment (PROXMOX_HOST, PROXMOX_TOKEN_SECRET, AUTH_MODE, ...)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-BUILD=0; ASK=1
+BUILD=0; ASK=1; OFFLINE=0; [ -f .appliance ] && OFFLINE=1
 for a in "$@"; do
   case "$a" in
     --build) BUILD=1 ;;
     --non-interactive) ASK=0 ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    --offline) OFFLINE=1 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
     *) die "Unknown option $a" ;;
   esac
 done
@@ -58,7 +60,8 @@ if [ "$new_env" = 1 ] || [ "$ASK" = 1 ]; then
   fi
 
   say "Sign-in (docs/authentication.md)"
-  env_set PUBLIC_URL "$(ask PUBLIC_URL "Address people open in the browser" "http://localhost:8080")"
+  default_url="http://localhost:8080"; [ -f .appliance ] && default_url="https://$(primary_ip)"
+  env_set PUBLIC_URL "$(ask PUBLIC_URL "Address people open in the browser" "$default_url")"
   mode=$(ask AUTH_MODE "Sign-in: oidc (Authentik, Entra ID, AD FS), ldap (Active Directory, OpenLDAP) or none" none)
   env_set AUTH_MODE "$mode"
   case "$mode" in
@@ -98,10 +101,24 @@ for k in PROXMOX_TOKEN_SECRET OIDC_CLIENT_SECRET LDAP_BIND_PASSWORD ANTHROPIC_AP
   env_set "$k" ""
 done
 env_set VERSION "$VERSION"
+if [ -f .appliance ]; then
+  # HTTPS (Caddy) only once people must sign in; without sign-in the console stays on this VM
+  host=$(env_get PUBLIC_URL); host=${host#*://}; host=${host%%/*}; host=${host%%:*}
+  env_set PUBLIC_HOST "$host"
+  if [ "$(env_get AUTH_MODE)" = none ]; then
+    env_set COMPOSE_PROFILES ""
+    dc --profile public rm -sf caddy >/dev/null 2>&1 || true
+    warn "Sign-in is off: the console is only reachable through an SSH tunnel (ssh -L 8080:127.0.0.1:8080 ...)."
+  else
+    env_set COMPOSE_PROFILES public
+  fi
+fi
 mkdir -p certs profiles backups && chmod 700 backups
 
 # ---- images and start --------------------------------------------------------------
-if [ "$BUILD" = 1 ]; then
+if [ "$OFFLINE" = 1 ]; then
+  say "Using the images already on this machine ($VERSION)"
+elif [ "$BUILD" = 1 ]; then
   say "Building images $VERSION from this checkout"
   dc build
 else
@@ -111,7 +128,7 @@ else
        Or build them here: scripts/install.sh --build"
   fi
 fi
-dc up -d
+dc up -d --remove-orphans
 wait_healthy
 cat <<EOF
 

@@ -124,6 +124,10 @@ The full path from a bare Proxmox node to the first production VM is in [OVERVIE
 repository, `docker login ghcr.io` with a token that has `read:packages` first (or `scripts/install.sh --build`).
 How releases are made, versioned and verified: [docs/releasing.md](docs/releasing.md).
 
+**Or as a Proxmox VM:** every release also has `proxmox-ai-infra-appliance-<version>.qcow2` (Debian 12 with Docker
+and the console). On the node: `./import-to-proxmox.sh --image <file> --ssh-key ~/.ssh/id_ed25519.pub --start`, then
+`ssh admin@<vm-ip>` and `sudo pac-setup`. See [docs/appliance.md](docs/appliance.md).
+
 ## Quick start (mock mode, 2 minutes)
 
 ```bash

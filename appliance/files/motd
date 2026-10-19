@@ -1,0 +1,11 @@
+
+  Proxmox AI Infra Console appliance  (/opt/proxmox-ai-infra)
+
+  First time:      sudo pac-setup          Proxmox connection, sign-in, HTTPS
+  Status / logs:   cd /opt/proxmox-ai-infra && sudo docker compose ps / logs -f backend
+  Backup:          sudo /opt/proxmox-ai-infra/scripts/backup.sh
+  Docs:            /opt/proxmox-ai-infra/docs/appliance.md
+
+  Until sign-in is configured the console listens on 127.0.0.1:8080 only:
+    ssh -L 8080:127.0.0.1:8080 <user>@<this-vm>   then open http://localhost:8080
+

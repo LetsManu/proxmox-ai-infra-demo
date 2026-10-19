@@ -1,0 +1,32 @@
+# Appliance overlay (appliance/, docs/appliance.md): HTTPS in front of the console with Caddy.
+# Caddy starts only with the "public" profile, which `pac-setup` enables once sign-in is configured;
+# before that the console is reachable only on the VM itself (SSH tunnel).
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2.10.2-alpine}
+    profiles: [public]
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      CONSOLE_TLS: ${CONSOLE_TLS:-internal}
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./appliance/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

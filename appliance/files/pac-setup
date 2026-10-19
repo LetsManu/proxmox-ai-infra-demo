@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Configure the console appliance: Proxmox connection, sign-in, HTTPS. Safe to run again.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+cd /opt/proxmox-ai-infra
+exec scripts/install.sh --offline "$@"
