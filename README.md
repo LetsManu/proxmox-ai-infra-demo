@@ -30,9 +30,12 @@ Bootstrap (once) ─▶ Platform: cloud images + templates ─▶ Plan ─▶ AI
 - [Architecture](#architecture)
 - [Features](#features)
 - [Prerequisites](#prerequisites)
+- [Install a release](#install-a-release)
 - [Quick start (mock mode, 2 minutes)](#quick-start-mock-mode-2-minutes)
 - [Going live against Proxmox](#going-live-against-proxmox)
 - [Workflows](#workflows): test deployment, production promotion, recreate
+- [Sign-in and roles](#sign-in-and-roles)
+- [Backup and upgrade](#backup-and-upgrade)
 - [Security model](#security-model)
 - [Configuration reference](#configuration-reference)
 - [Development](#development)
@@ -93,7 +96,9 @@ More detail: [docs/architecture.md](docs/architecture.md).
 - **AI review**: summary, risk (low/medium/high), pre-flight checks, approval recommendation. Any destroy is HIGH and the AI can never lower that.
 - **Validation**: VM running, cloud-init finished, QEMU guest agent reports an IP, optional TCP health check, overall PASS/FAIL.
 - **Recreate**: destroy and clone again from the template (cloud-init reruns). In production this also requires typed approval (`RECREATE`).
-- **History**: every plan, deploy, validation and approval with user and plan summary.
+- **Sign-in with your directory**: Authentik, Microsoft Entra ID, AD FS (OIDC) or Active Directory / OpenLDAP (LDAP). Roles viewer, operator, approver come from groups; optional four-eyes rule for production. See [docs/authentication.md](docs/authentication.md).
+- **History**: every plan, deploy, validation, approval and sign-in with the signed-in user and plan summary.
+- **Install, upgrade, backup**: release archives with `scripts/install.sh`, `scripts/upgrade.sh`, `scripts/backup.sh` / `restore.sh`; images on ghcr.io.
 - **Platform**: shows every resource the console depends on (networks, storage, pool, templates) and who creates it; *Check what is missing* plans the platform stack, *Prepare platform* applies it (cloud images, VM templates, LXC templates).
 - **Software per project**: profiles are discovered from Ansible role folders (built-in plus a project `profiles/` folder, re-read live), plus free-form apt/Chocolatey packages per VM. Ansible installs them after deploy, recreate and promotion; *Configure* re-runs it; validation checks it. See [docs/configuration.md](docs/configuration.md).
 - **Windows Server 2022** alongside Ubuntu 24.04 and Debian 12 (Windows template provided once, see [docs/windows-template.md](docs/windows-template.md)). Template, cloud-init clone, Ansible configuration and Windows tests were run end to end on an emulated Proxmox-style VM; see [what was verified](docs/windows-template.md#verification).
@@ -103,6 +108,19 @@ More detail: [docs/architecture.md](docs/architecture.md).
 - Docker Engine with Compose v2 (for the console)
 - For live mode: Proxmox VE 8.x (8.4+ for the API template build; the shell script works on 7.2+), a least-privilege API token, a cloud-init template per OS
 - Optional: an Anthropic API key
+
+## Install a release
+
+Each release on GitHub has an install archive and images on `ghcr.io`. On the console host (Docker with Compose v2):
+
+```bash
+sha256sum -c proxmox-ai-infra-<version>.tar.gz.sha256
+tar xzf proxmox-ai-infra-<version>.tar.gz && cd proxmox-ai-infra-<version>
+scripts/install.sh            # asks for Proxmox and sign-in, writes .env and secrets/, pulls, starts
+```
+
+The full path from a bare Proxmox node to the first production VM is in [OVERVIEW.md](OVERVIEW.md). For a private
+repository, `docker login ghcr.io` with a token that has `read:packages` first (or `scripts/install.sh --build`).
 
 ## Quick start (mock mode, 2 minutes)
 
@@ -179,6 +197,35 @@ The same flow is available on the command line: `infra/scripts/promote.sh` refus
 - **TEST**: one click. `tofu plan -replace=…` then apply. Validation state is reset.
 - **PRODUCTION**: plan with `-replace`, then the approval panel with the word `RECREATE`. The plan is marked destructive and HIGH risk. If the VM holds data, restore from backup instead (the AI troubleshooting output says so).
 
+## Sign-in and roles
+
+| `AUTH_MODE` | Directory |
+|---|---|
+| `oidc` | Authentik, Microsoft Entra ID, AD FS, Keycloak (single sign-on, PKCE) |
+| `ldap` | Active Directory (incl. nested groups and UPN sign-in), OpenLDAP, Authentik LDAP outpost (LDAPS or StartTLS) |
+| `none` | no sign-in; demo on your own machine only |
+
+| Role | May |
+|---|---|
+| viewer | see everything |
+| operator | plan, deploy, validate and configure in Test; request production changes |
+| approver | approve production changes, apply the platform stack, approve AI drafts |
+
+Groups map to roles with `AUTH_VIEWER_GROUPS`, `AUTH_OPERATOR_GROUPS`, `AUTH_APPROVER_GROUPS`; `AUTH_FOUR_EYES=true`
+keeps people from approving their own production request. Step-by-step setup for each directory:
+[docs/authentication.md](docs/authentication.md).
+
+## Backup and upgrade
+
+```bash
+scripts/backup.sh                                  # database, OpenTofu state, approved roles, SSH host keys -> backups/
+scripts/restore.sh backups/console-<time>.tar.gz   # type RESTORE; Proxmox itself is not touched
+scripts/upgrade.sh                                 # after extracting a new release here: backup, pull, restart
+```
+
+Secrets are not in the backup: keep `secrets/` and `.env` in your vault. Run `backup.sh` daily from cron and copy
+`backups/` off the host.
+
 ## Security model
 
 - **Credentials stay server-side.** The Proxmox token lives in `.env` or a Docker secret (`docker-compose.secrets.yml`, `*_FILE` variables), is passed to OpenTofu as environment variables, is scrubbed from job logs, and is never returned by any endpoint.
@@ -191,7 +238,8 @@ The same flow is available on the command line: `infra/scripts/promote.sh` refus
 - **Nothing reaches Ansible as code.** Everything the console passes to a playbook (profiles, packages, compose files, test checks) is tagged `!unsafe`, so Ansible never evaluates templates in it; guest-reported IPs are validated; Ansible gets a minimal environment without the console's secrets. AI-drafted roles are rejected if they contain lookups, controller-side file sources, delegation or non-allowlisted modules.
 - **Containers are hardened**: non-root, read-only root filesystem, all capabilities dropped, `no-new-privileges`, rotated logs. The backend port binds to `127.0.0.1` only.
 - **Repository hygiene**: `.gitignore` covers `.env`, state, plans, secrets, logs; pre-commit hook (`git config core.hooksPath .githooks`) and CI run gitleaks.
-- **Not included**: authentication. `APP_USER` is a label for the audit trail. The console therefore binds to `127.0.0.1` by default (`FRONTEND_BIND`); put it behind your SSO/reverse proxy (e.g. Authentik, oauth2-proxy) before giving anyone else access.
+- **Sign-in and roles** from your directory (OIDC or LDAP over TLS). Server-side sessions (only a hash of the token is stored), `HttpOnly`/`SameSite` cookie, a CSRF check on every change, PKCE plus nonce and audience checks for OIDC, escaped filters and a lockout for LDAP. Every write needs the operator role, every production decision the approver role, optionally from a second person. Details: [docs/authentication.md](docs/authentication.md#security-notes).
+- **HTTPS**: terminate it in a reverse proxy in front of the console; `FRONTEND_BIND=127.0.0.1` by default so nothing else reaches it.
 - **Browser hardening**: strict Content-Security-Policy (no inline or third-party scripts, no framing), `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
 
 See [SECURITY.md](SECURITY.md) for reporting issues.
@@ -220,6 +268,12 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | `ANSIBLE_SSH_KEY_FILE`, `WINDOWS_ADMIN_PASSWORD` | – | Software configuration (prefer Docker secrets) |
 | `PROFILES_DIR`, `EXTRA_PROFILE_DIRS`, `PACKAGE_DENYLIST` | `./profiles`, `/profiles`, – | Project software profiles and package policy |
 | `AI_PROVIDER`, `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_MAX_TOKENS` | `none`, –, `claude-opus-5-5`, `4000` | AI assistance |
+| `AUTH_MODE` | `none` | `oidc`, `ldap` or `none` ([docs/authentication.md](docs/authentication.md)) |
+| `AUTH_VIEWER_GROUPS`, `AUTH_OPERATOR_GROUPS`, `AUTH_APPROVER_GROUPS`, `AUTH_FOUR_EYES` | –, –, –, `false` | Groups per role (`;`-separated), four-eyes rule |
+| `PUBLIC_URL`, `AUTH_COOKIE_SECURE`, `AUTH_SESSION_HOURS` | `http://localhost:8080`, `true`, `8` | Browser address (OIDC redirect), cookie over HTTPS only, session length |
+| `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_GROUPS_CLAIM` | –, –, –, `groups` | OIDC provider (secret via `secrets/oidc_client_secret`) |
+| `LDAP_URL`, `LDAP_BIND_DN`, `LDAP_BIND_PASSWORD`, `LDAP_BASE_DN`, `LDAP_USER_FILTER`, `LDAP_NESTED_GROUPS`, `LDAP_CA_FILE` | AD defaults | Directory (password via `secrets/ldap_bind_password`, CA in `certs/`) |
+| `VERSION`, `IMAGE_REGISTRY` | `dev`, `ghcr.io/letsmanu/proxmox-ai-infra-demo` | Release images (set by `scripts/install.sh`) |
 | `FRONTEND_PORT`, `BACKEND_PORT` | `8080`, `8000` | Published ports |
 
 ### API
@@ -277,6 +331,8 @@ Enable the secret-scanning pre-commit hook once: `git config core.hooksPath .git
 | Validation: cloud-init not completed | No DNS/internet on the test VLAN, broken snippet | `cloud-init status --long` on the VM console |
 | Windows: *WinRM HTTPS 5986 is not open* | cloudbase-init has not finished, or `metadata_services` is not `ConfigDriveService` | cloudbase-init log on COM1 / `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\log`; see docs/windows-template.md |
 | Windows baseline: *Unencrypted WinRM (5985)* fails | Template still has the HTTP listener | Add the `LocalScripts` line from docs/windows-template.md step 4 and rebuild the template |
+| Sign-in: *none of the console's groups* | Group names differ from what the directory sends | [docs/authentication.md#troubleshooting](docs/authentication.md#troubleshooting) |
+| Signed in, but back on the sign-in page | `AUTH_COOKIE_SECURE=true` over plain HTTP | Use HTTPS, or `false` in a lab |
 | `Saved plan is stale` | State changed between plan and apply | Create a new plan |
 | `VM ID … outside the allowed range` | Wrong environment/tfvars | Check `environments/*.tfvars` |
 | Assistant shows *Local rules* | No key, `AI_PROVIDER=none`, or provider unreachable | Expected offline; set `AI_PROVIDER=anthropic` + key |

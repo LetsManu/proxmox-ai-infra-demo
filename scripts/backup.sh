@@ -4,7 +4,7 @@
 # Secrets are NOT in the archive: keep secrets/ and .env in your password manager or vault.
 # Daily at 02:15:  15 2 * * *  cd /opt/proxmox-ai-infra && scripts/backup.sh >> backups/backup.log 2>&1
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 dir=${1:-backups}

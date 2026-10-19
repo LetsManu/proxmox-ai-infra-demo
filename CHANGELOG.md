@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.1.0 – 2026-10-19
+
+Sign-in with your directory, and releases that install in a few minutes.
+
+**Sign-in and roles** ([docs/authentication.md](docs/authentication.md))
+- `AUTH_MODE=oidc` for Authentik, Microsoft Entra ID, AD FS and other OpenID Connect providers (authorization code flow with PKCE; ID token signature, issuer, audience and nonce checked; groups from the token or userinfo).
+- `AUTH_MODE=ldap` for Active Directory (nested groups, sign-in by short name or UPN), OpenLDAP and the Authentik LDAP outpost. TLS is required (LDAPS or StartTLS); filter input is escaped; empty passwords are refused; five failures lock a username for five minutes.
+- Roles from groups: **viewer**, **operator**, **approver**. Writes need operator; production approvals, the platform apply and AI drafts need approver. `AUTH_FOUR_EYES=true` keeps a requester from deciding their own production change.
+- Server-side sessions (only a hash of the token is stored), `HttpOnly`/`SameSite` cookie, CSRF token on every change, origin check on sign-in. Jobs, approvals and the history record the signed-in user; sign-ins are in the history too.
+- UI: sign-in page, name and role in the header, sign-out, approval buttons only for approvers, read-only note for viewers, warning banner when `AUTH_MODE=none`.
+- `/api/health` tells anonymous callers only `{"status": "ok"}`.
+- Tested against OpenLDAP (LDAPS and StartTLS), Samba Active Directory (nested groups, UPN) and Authentik (OIDC, real browser). Found and fixed on the way: wrong passwords answered with 502 and were not counted, OpenLDAP groups were not read (`memberOf` is operational), and the four-eyes rule could be bypassed on AD by signing in once by name and once by UPN.
+
+**Install, upgrade, backup**
+- Releases: tag `vX.Y.Z` (or `-rc.N`) runs the full CI, publishes backend and frontend images to ghcr.io with SBOM and provenance, and attaches an install archive with its SHA-256.
+- `scripts/install.sh` asks for Proxmox and sign-in, writes `.env` (mode 600) and `secrets/` (owned by uid 10001), pulls the images and waits until the console is healthy. `--build` builds locally, `--non-interactive` reads answers from the environment.
+- `scripts/upgrade.sh` backs up first, creates secret files new releases expect, lists new settings, pulls and restarts.
+- `scripts/backup.sh` / `scripts/restore.sh` (`python -m app.cli backup|verify|restore`): database (online copy), OpenTofu state, approved AI roles and SSH host keys; no secrets, no sessions. Restore refuses links and paths outside the data directories and checks the database before replacing anything.
+- One version number in backend, frontend and changelog, checked in CI; shown in the UI footer.
+
+**Upgrading from 2.0.x**
+- Two new secret files: `secrets/oidc_client_secret` and `secrets/ldap_bind_password` (empty if unused). `scripts/upgrade.sh` creates them.
+- Sign-in is off until you set `AUTH_MODE` (the console then shows a warning). Set it before others use the console.
+- `docker-compose.yml` now names images (`IMAGE_REGISTRY`, `VERSION`); `docker compose up --build` keeps building from a checkout.
+
 ## 2.0.3 – 2026-10-19
 
 Windows Server 2022 run end to end: template built per `docs/windows-template.md`, linked clone with a Proxmox-style `configdrive2` cloud-init drive, the console's Ansible configuration and Windows tests (details: [docs/windows-template.md](docs/windows-template.md#verification)).

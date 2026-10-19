@@ -118,7 +118,22 @@ Test machines are **linked clones**, so the template and Test disks must be on t
 
 ## Step 4: Prepare the console host and get the code
 
-On the console host:
+On the console host, either install a **release** (recommended) or work from a git checkout.
+
+**Release.** Download `proxmox-ai-infra-<version>.tar.gz` and its `.sha256` from the GitHub release page, then:
+
+```bash
+sha256sum -c proxmox-ai-infra-<version>.tar.gz.sha256
+tar xzf proxmox-ai-infra-<version>.tar.gz && cd proxmox-ai-infra-<version>
+scripts/install.sh
+```
+
+`install.sh` asks for the Proxmox connection and the sign-in method, writes `.env` (mode 600) and `secrets/` (owned by
+uid 10001), pulls the release images and starts the console. That covers steps 7, 8 and 10 for the basics; read them
+anyway for the settings it does not ask (storage, VLANs, SSH key). The images are on `ghcr.io`; for a private
+repository run `docker login ghcr.io` with a token that has `read:packages` first.
+
+**Git checkout** (to change the code):
 
 ```bash
 git clone https://github.com/LetsManu/proxmox-ai-infra-demo.git
@@ -199,7 +214,7 @@ Edit `.env` on the console host. `.env.example` explains every line. Set at leas
 | Setting | Value |
 |---|---|
 | `LIVE_MODE` | `true` |
-| `APP_USER` | name shown in the history, e.g. `it-operations` |
+| `APP_USER` | name in the history when `AUTH_MODE=none` |
 | `PROXMOX_HOST` | your node's DNS name or IP, e.g. `pve.example.internal` |
 | `PROXMOX_VERIFY_SSL` | `true` with a trusted certificate; `false` only for a self-signed lab certificate |
 | `PROXMOX_USER`, `PROXMOX_TOKEN_ID`, `PROXMOX_NODE`, `POOL_ID` | from the bootstrap output |
@@ -214,7 +229,11 @@ Edit `.env` on the console host. `.env.example` explains every line. Set at leas
 | `ANSIBLE_SSH_KEY_FILE`, `WINDOWS_ADMIN_PASSWORD`, `ANTHROPIC_API_KEY` | **leave empty**: they come from `secrets/` |
 | `AI_PROVIDER` | `anthropic` to use Claude (key in step 8), `none` for local rules |
 | `PACKAGE_DENYLIST` | packages nobody may install, e.g. `telnetd,rsh-server` |
-| `FRONTEND_BIND` | `127.0.0.1` (default): only reachable on the console host, publish it through your SSO/reverse proxy (step 15). `0.0.0.0` only on a trusted network: the console has no login of its own |
+| `AUTH_MODE` | `oidc` (Authentik, Microsoft Entra ID, AD FS) or `ldap` (Active Directory, OpenLDAP); `none` only for a demo on your own machine. Setup per directory: [docs/authentication.md](docs/authentication.md) |
+| `AUTH_VIEWER_GROUPS`, `AUTH_OPERATOR_GROUPS`, `AUTH_APPROVER_GROUPS` | your directory groups per role, `;`-separated |
+| `AUTH_FOUR_EYES` | `true`: whoever requests a production change cannot approve it |
+| `PUBLIC_URL` | the HTTPS address people open, e.g. `https://console.example.internal` |
+| `FRONTEND_BIND` | `127.0.0.1` (default): only your reverse proxy on this host reaches the console; it terminates HTTPS |
 
 Leave `SNIPPETS_DATASTORE` empty if you don't give the console SSH access to the node (`PROXMOX_SSH_*`, see [docs/proxmox-setup.md](docs/proxmox-setup.md) section 6). Ansible installs the guest agent anyway; snippets only make the first boot report its IP sooner.
 
@@ -222,7 +241,7 @@ Leave `SNIPPETS_DATASTORE` empty if you don't give the console SSH access to the
 
 ## Step 8: Put the secrets in place
 
-Secrets are files in `secrets/` (gitignored), mounted into the backend as Docker secrets. All five files must exist; an **empty file means "not used"**.
+Secrets are files in `secrets/` (gitignored), mounted into the backend as Docker secrets. All seven files must exist; an **empty file means "not used"**. (`scripts/install.sh` creates them.)
 
 ```bash
 mkdir -p secrets && chmod 700 secrets
@@ -231,6 +250,8 @@ cp ./infra-console secrets/ansible_ssh_key                            # private 
 printf '%s' 'sk-ant-…'          > secrets/anthropic_api_key           # or: : > secrets/anthropic_api_key
 printf '%s' '<12+ characters>'  > secrets/windows_admin_password      # or: : > secrets/windows_admin_password
 : > secrets/proxmox_ssh_key                                           # node SSH for snippets; empty = off
+printf '%s' '<client secret>'   > secrets/oidc_client_secret          # AUTH_MODE=oidc, else: : > ...
+printf '%s' '<bind password>'   > secrets/ldap_bind_password          # AUTH_MODE=ldap, else: : > ...
 
 # The backend runs as uid 10001 and must be able to read them:
 sudo chown 10001:10001 secrets/*
@@ -241,7 +262,7 @@ The `chown` matters: with files owned by your user and mode 600, the backend can
 
 Then delete the private key copy from places you don't need it (`shred -u ./infra-console` on the console host if you created it there).
 
-**Check:** `sudo ls -ln secrets/` shows five files owned by `10001`, mode `-rw-------`, and `proxmox_token_secret` is not empty.
+**Check:** `sudo ls -ln secrets/` shows seven files owned by `10001`, mode `-rw-------`, and `proxmox_token_secret` is not empty.
 
 ## Step 9: Check network reachability
 
@@ -279,7 +300,10 @@ Open `http://localhost:8080` on the console host (or through your reverse proxy 
 
 If the backend restarts in a loop, run `docker compose logs backend`. It usually reports an unreadable secret (step 8) or a wrong value in `.env`.
 
-> The console has **no login of its own**. `APP_USER` is only a name for the audit trail. Before other people use it, put it behind your SSO or reverse proxy (step 15).
+With `AUTH_MODE=oidc` or `ldap` the console opens with a sign-in page; your role is shown next to your name in the header.
+With `AUTH_MODE=none` a yellow banner says that there is no sign-in: use it like that only on your own machine.
+
+![Sign-in](docs/images/auth/01-login-sso.png)
 
 ## Step 11: Prepare the platform (templates)
 
@@ -470,7 +494,7 @@ Production machines are validated the same way, on the production network.
 **Check:**
 - Both machines show *Passed*.
 - Proxmox shows VM `9xx wpsite-test` (linked clone, `vtest`) and VM `1xx wpsite` (full clone, `vprod`).
-- **Activity** lists every step with your `APP_USER`.
+- **Activity** lists every step with the name of whoever did it (your directory account, or `APP_USER` without sign-in).
 
 ## Step 14: First stack
 
@@ -548,9 +572,9 @@ The dashboard per environment. **Test**:
 
 ## Step 15: Before you hand it to others
 
-- [ ] Put the console behind SSO/a reverse proxy with TLS (e.g. oauth2-proxy, Authentik, your company IdP) and bind the frontend to that proxy only (`FRONTEND_BIND=127.0.0.1`).
-- [ ] Set `APP_USER` per deployment, or pass the authenticated user name from the proxy if you extend the backend.
-- [ ] Back up: the Docker volumes `proxmox-ai-infra_app-data` (history, machines, approvals) and `proxmox-ai-infra_tf-workspace` (OpenTofu state for Test and Production), and `infra/bootstrap/terraform.tfstate` (admin side).
+- [ ] Sign-in: `AUTH_MODE=oidc` or `ldap` with your groups ([docs/authentication.md](docs/authentication.md)), `AUTH_FOUR_EYES=true`, and sign in once with a viewer, an operator and an approver account to check the roles.
+- [ ] HTTPS: a reverse proxy in front (`PUBLIC_URL=https://…`, `AUTH_COOKIE_SECURE=true`, `FRONTEND_BIND=127.0.0.1`).
+- [ ] Backups: `scripts/backup.sh` daily from cron, a copy off the host, and one test restore (`scripts/restore.sh`); keep `secrets/`, `.env` and `infra/bootstrap/terraform.tfstate` (admin side) in your vault.
 - [ ] Give the API token an expiry date (`token_expiration_date`) and note when to rotate it.
 - [ ] Set `PACKAGE_DENYLIST` for your policy; review which project profiles are mounted.
 - [ ] Enable the secret-scanning pre-commit hook in your clone: `git config core.hooksPath .githooks`.
@@ -562,14 +586,17 @@ The dashboard per environment. **Test**:
 
 | Task | How |
 |---|---|
-| Update the console | `git pull && docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build` (data and state live in volumes) |
+| Update the console | release: extract the new archive over the installation, then `scripts/upgrade.sh` (backs up first, reports new settings); git checkout: `scripts/upgrade.sh v<version>` (add `UPGRADE_BUILD=1` to build locally) |
 | Change a setting | edit `.env`, then `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d backend` |
 | Rotate the API token | re-run the bootstrap with a new `token_expiration_date` (or `pveum user token remove/add`), write the new secret to `secrets/proxmox_token_secret`, `chown 10001`, restart the backend |
 | New cloud image version | build a new template under a new ID, change `TEMPLATE_*_ID`, restart; existing machines show *Replace* in their next plan ([docs/cloud-images.md](docs/cloud-images.md#update-or-recreate-a-template)) |
 | Broken Test machine | machine page → **Recreate** (destroys and rebuilds from the template) |
 | Software changed on a machine | machine page → **Install software again** (idempotent) |
 | Watch what happened | **Activity**; job logs via **Show details**; `docker compose logs -f backend` |
-| Back up | `docker run --rm -v proxmox-ai-infra_app-data:/d -v proxmox-ai-infra_tf-workspace:/w -v "$PWD":/b alpine tar czf /b/console-backup.tgz /d /w` |
+| Back up | `scripts/backup.sh` (database, OpenTofu state, approved roles, SSH host keys; keeps 14). Cron: `15 2 * * * cd <dir> && scripts/backup.sh >> backups/backup.log 2>&1` |
+| Restore | `scripts/restore.sh backups/console-<time>.tar.gz` (type `RESTORE`); then plan once per environment to compare with Proxmox |
+| Roll back an upgrade | `VERSION=<old>` in `.env`, `scripts/restore.sh <pre-upgrade backup>` |
+| Who may do what | directory groups → roles ([docs/authentication.md](docs/authentication.md)); people sign out and in again after a group change |
 | Remove everything the bootstrap created | `tofu -chdir=infra/bootstrap destroy` (admin shell, after removing all machines) |
 
 ## Troubleshooting
@@ -625,6 +652,7 @@ Then continue with step 6. Set `POOL_ID=` (empty) if you didn't create a pool, a
 | API token and privileges | [docs/api-token-setup.md](docs/api-token-setup.md) |
 | Cloud images and templates | [docs/cloud-images.md](docs/cloud-images.md) |
 | Windows template | [docs/windows-template.md](docs/windows-template.md) |
+| Sign-in (Authentik, Entra ID, AD FS, Active Directory, LDAP) and roles | [docs/authentication.md](docs/authentication.md) |
 | Software profiles, packages, Ansible | [docs/configuration.md](docs/configuration.md) |
 | Stacks, LXC, Docker services | [docs/stacks.md](docs/stacks.md) |
 | Automated tests and review queue | [docs/testing.md](docs/testing.md) |

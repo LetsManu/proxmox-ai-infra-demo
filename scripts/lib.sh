@@ -21,7 +21,10 @@ dc() {
 # root-owned files for the backend (uid 10001) need sudo unless we are root
 as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
 
-bundle_version() { sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/app/__init__.py; }
+# release archives carry VERSION (e.g. 2.1.0-rc.1 = image tag); a git checkout falls back to the code's version
+bundle_version() {
+  if [ -s VERSION ]; then tr -d '[:space:]' < VERSION; else sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/app/__init__.py; fi
+}
 
 # set KEY=VALUE in .env (replace or append); the value is passed through the environment, so any character is safe
 env_set() {
@@ -43,10 +46,10 @@ ensure_secret_files() {
 }
 
 wait_healthy() {
-  local port url i
+  local port url
   port=$(env_get FRONTEND_PORT); port=${port:-8080}
   url="http://127.0.0.1:${port}"
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if curl -fsS "$url/healthz" >/dev/null 2>&1 && curl -fsS "$url/api/health" >/dev/null 2>&1; then
       say "Console is up: $url (or your PUBLIC_URL)"
       return 0

@@ -5,7 +5,7 @@
 #   scripts/upgrade.sh v2.1.0      git checkout: fetch and switch to that tag first
 # Always backs up first. Roll back: set VERSION=<old> in .env and run scripts/restore.sh <pre-upgrade backup>.
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 [ -f .env ] || die "No .env here. For a new installation run scripts/install.sh."
@@ -33,6 +33,7 @@ missing=$(comm -23 <(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' .env.example | sor
                    <(sed -n 's/^\([A-Z_][A-Z0-9_]*\)=.*/\1/p' .env | sort -u))
 if [ -n "$missing" ]; then
   warn "New settings (defaults apply until you set them in .env, see .env.example and CHANGELOG.md):"
+  # shellcheck disable=SC2086 # one name per line
   printf '  %s\n' $missing >&2
 fi
 env_set VERSION "$new"

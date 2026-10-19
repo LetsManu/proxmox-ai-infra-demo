@@ -6,7 +6,7 @@
 #   --build            build the images from this checkout instead of pulling them
 #   --non-interactive  take answers from the environment (PROXMOX_HOST, PROXMOX_TOKEN_SECRET, AUTH_MODE, ...)
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 BUILD=0; ASK=1

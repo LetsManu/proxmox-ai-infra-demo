@@ -1,0 +1,99 @@
+# Release: push a tag vX.Y.Z (or vX.Y.Z-rc.N for a release candidate).
+#   1. full CI on the tagged commit
+#   2. backend and frontend images to ghcr.io (with SBOM and provenance), tag X.Y.Z[-rc.N]; "latest" for final releases
+#   3. GitHub release with the install archive (scripts/install.sh inside) and its SHA-256
+# Only GitHub's own tooling is used (docker, gh), so there is no third-party action to pin.
+name: Release
+on:
+  push: { tags: ["v*"] }
+permissions: { contents: read }
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions: { contents: read }
+
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: v
+        name: Tag matches the code
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-rc\.[0-9]+)?$ ]] || { echo "Tag $tag is not vX.Y.Z or vX.Y.Z-rc.N"; exit 1; }
+          base="${BASH_REMATCH[1]}"
+          code=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/app/__init__.py)
+          [ "$code" = "$base" ] || { echo "Tag $tag but backend/app/__init__.py says $code"; exit 1; }
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$([ -n "${BASH_REMATCH[2]}" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: [ci, version]
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    env:
+      REGISTRY: ghcr.io/${{ github.repository_owner }}/proxmox-ai-infra-demo
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          REGISTRY=$(echo "$REGISTRY" | tr '[:upper:]' '[:lower:]')
+          docker buildx create --use --name release
+          extra=""
+          [ "${{ needs.version.outputs.prerelease }}" = false ] && extra=latest
+          for svc in backend frontend; do
+            if [ "$svc" = backend ]; then ctx=.; file=backend/Dockerfile; else ctx=frontend; file=frontend/Dockerfile; fi
+            tags=(-t "$REGISTRY/$svc:$VERSION")
+            [ -n "$extra" ] && tags+=(-t "$REGISTRY/$svc:latest")
+            docker buildx build "$ctx" -f "$file" "${tags[@]}" --platform linux/amd64 --push \
+              --sbom=true --provenance=mode=max \
+              --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+              --label "org.opencontainers.image.version=$VERSION" \
+              --label "org.opencontainers.image.revision=${{ github.sha }}"
+          done
+
+  publish:
+    needs: [images, version]
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install archive
+        run: |
+          name="proxmox-ai-infra-$VERSION"
+          echo "$VERSION" > VERSION
+          git archive --format=tar.gz --prefix="$name/" --add-file=VERSION -o "$name.tar.gz" HEAD
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          base="${VERSION%%-*}"
+          awk -v v="$base" '$0 ~ "^## " v " " {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          \`\`\`bash
+          tar xzf $name.tar.gz && cd $name
+          scripts/install.sh
+          \`\`\`
+
+          Upgrade an existing installation: extract over it, then \`scripts/upgrade.sh\`. Images: \`ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/proxmox-ai-infra-demo/{backend,frontend}:$VERSION\`.
+          EOF
+      - name: GitHub release
+        run: |
+          pre=""
+          [ "${{ needs.version.outputs.prerelease }}" = true ] && pre="--prerelease"
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "v$VERSION" --notes-file notes.md $pre \
+            "proxmox-ai-infra-$VERSION.tar.gz" "proxmox-ai-infra-$VERSION.tar.gz.sha256"

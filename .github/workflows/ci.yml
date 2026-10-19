@@ -6,6 +6,7 @@ on:
   push: { branches: [main] }
   pull_request:
   workflow_dispatch:
+  workflow_call: # the release workflow runs the full CI before publishing
 permissions: { contents: read }
 
 jobs:
@@ -79,12 +80,32 @@ jobs:
       - name: Compose config with .env.example (+ secrets override)
         run: |
           cp .env.example .env
-          mkdir -p secrets && touch secrets/proxmox_token_secret secrets/anthropic_api_key secrets/ansible_ssh_key secrets/windows_admin_password secrets/proxmox_ssh_key
+          mkdir -p secrets && touch secrets/proxmox_token_secret secrets/anthropic_api_key secrets/ansible_ssh_key secrets/windows_admin_password secrets/proxmox_ssh_key secrets/oidc_client_secret secrets/ldap_bind_password
           docker compose config -q
           docker compose -f docker-compose.yml -f docker-compose.secrets.yml config -q
           rm -rf .env secrets
 
+  # install/upgrade/backup scripts and one version number across backend, frontend and changelog
+  release-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Scripts parse and pass shellcheck
+        run: |
+          for f in scripts/*.sh; do bash -n "$f"; done
+          shellcheck -x -S warning scripts/*.sh
+      - name: One version everywhere
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/app/__init__.py)
+          f=$(jq -r .version frontend/package.json)
+          l=$(jq -r .version frontend/package-lock.json)
+          echo "backend=$v frontend=$f lock=$l"
+          test -n "$v" && test "$v" = "$f" && test "$v" = "$l"
+          grep -q "^## $v " CHANGELOG.md || { echo "CHANGELOG.md has no section for $v"; exit 1; }
+
   secrets:
+    # scans the pushed commits; a tag push (release) has none, its commit was scanned on main
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

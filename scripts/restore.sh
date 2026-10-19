@@ -4,7 +4,7 @@
 # Proxmox is not touched. Afterwards, plan once per environment: the plan shows any difference between the
 # restored state and what really runs on Proxmox.
 set -euo pipefail
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
 file=${1:-}
