@@ -50,3 +50,6 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# Local CA certificates (LDAP_CA_FILE)
+certs/

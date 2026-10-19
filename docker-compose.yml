@@ -1,5 +1,8 @@
 name: proxmox-ai-infra
 
+# Images: releases publish them to the registry (scripts/install.sh pulls VERSION from .env).
+# Without VERSION the tag is "dev" and `docker compose up --build` builds them from this checkout.
+
 # Shared hardening (same baseline as friendflix): non-root, read-only root FS,
 # no Linux capabilities, no privilege escalation, rotated logs.
 x-hardening: &hardening
@@ -14,6 +17,7 @@ services:
   backend:
     <<: *hardening
     tmpfs: [/tmp]
+    image: ${IMAGE_REGISTRY:-ghcr.io/letsmanu/proxmox-ai-infra-demo}/backend:${VERSION:-dev}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -29,6 +33,7 @@ services:
       - app-data:/data          # SQLite deployment history
       - tf-workspace:/workspace # separate TEST/PROD Terraform state + plans
       - ${PROFILES_DIR:-./profiles}:/profiles:ro # project software profiles (Ansible roles), re-read live
+      - ${CERTS_DIR:-./certs}:/certs:ro # optional CA certificates, e.g. LDAP_CA_FILE=/certs/ldap-ca.crt
     ports:
       # Bound to localhost only; the browser talks to the API through the frontend proxy.
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
@@ -43,6 +48,7 @@ services:
   frontend:
     <<: *hardening
     tmpfs: [/tmp]
+    image: ${IMAGE_REGISTRY:-ghcr.io/letsmanu/proxmox-ai-infra-demo}/frontend:${VERSION:-dev}
     build:
       context: ./frontend
     depends_on:
