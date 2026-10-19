@@ -4,6 +4,8 @@ from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException
 
+from .. import __version__
+from ..auth import actor, current_user
 from ..config import ENVIRONMENTS, get_settings, placement, public_settings
 from ..database import session_scope
 from ..models import Job, JobStatus, VirtualMachine
@@ -20,7 +22,10 @@ router = APIRouter(prefix="/api", tags=["vms"])
 @router.get("/health")
 def health():
     s = get_settings()
-    return {"status": "ok", "mode": "live" if s.live_mode else "mock", "settings": public_settings(s)}
+    if current_user() is None:  # the container health check and anonymous callers learn nothing else
+        return {"status": "ok"}
+    return {"status": "ok", "version": __version__, "mode": "live" if s.live_mode else "mock",
+            "settings": public_settings(s)}
 
 
 @router.get("/proxmox/status")
@@ -78,6 +83,7 @@ def list_vms():
 @router.post("/vms/deploy/test", response_model=JobCreated, status_code=202)
 def deploy_test(req: DeployTestRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     spec = req.spec
     if spec.environment != "test":
         raise HTTPException(400, "This endpoint only deploys to TEST. Production uses the promotion workflow.")
@@ -89,7 +95,7 @@ def deploy_test(req: DeployTestRequest):
     if plan_job.result.get("applied"):
         raise HTTPException(409, "This plan was already applied. Generate a new plan.")
 
-    job_id = create_job(action="deploy", environment="test", vm_name=spec.name, user=s.app_user,
+    job_id = create_job(action="deploy", environment="test", vm_name=spec.name, user=who,
                         params={"spec": spec.model_dump(), "plan_job_id": plan_job.id})
 
     def work(ctx: JobContext):
@@ -114,19 +120,20 @@ def recreate(req: RecreateRequest):
     TEST: plan + apply in one job. PRODUCTION: plan, then human approval with the word RECREATE.
     """
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     env = req.environment
 
     if env == "prod" and req.stage != "request":
         job = check_approval(req, action="recreate", word="RECREATE")
         if req.stage == "reject":
-            finish_approval_job(job.id, JobStatus.FAILED, "rejected", s.app_user)
+            finish_approval_job(job.id, JobStatus.FAILED, "rejected", who)
             return JobCreated(job_id=job.id, status=JobStatus.FAILED)
-        finish_approval_job(job.id, JobStatus.SUCCESS, "approved", s.app_user)
-        apply_id = create_job(action="recreate-apply", environment="prod", vm_name=job.vm_name, user=s.app_user,
+        finish_approval_job(job.id, JobStatus.SUCCESS, "approved", who)
+        apply_id = create_job(action="recreate-apply", environment="prod", vm_name=job.vm_name, user=who,
                               params={"approval_job_id": job.id})
 
         def apply_work(ctx: JobContext):
-            ctx.log(f"Approved by {s.app_user} (typed RECREATE)")
+            ctx.log(f"Approved by {who} (typed RECREATE)")
             apply_plan(ctx, s, "prod", job.result["plan"], None)
             configure(ctx, s, "prod", job.vm_name)
             return job.result["plan"]["summary"]
@@ -137,7 +144,7 @@ def recreate(req: RecreateRequest):
     vm = get_vm(req.name, env)
     if not vm:
         raise HTTPException(404, f"VM '{req.name}' is not deployed in {env}.")
-    job_id = create_job(action="recreate", environment=env, vm_name=req.name, user=s.app_user,
+    job_id = create_job(action="recreate", environment=env, vm_name=req.name, user=who,
                         params={"name": req.name})
 
     def work(ctx: JobContext):
@@ -176,12 +183,13 @@ def power(req: PowerRequest):
 def configure_vm(req: ConfigureRequest):
     """Re-run Ansible (idempotent) for a deployed VM."""
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     vm = get_vm(req.name, req.environment)
     if not vm:
         raise HTTPException(404, f"VM '{req.name}' is not deployed in {req.environment}.")
     if req.environment == "prod":
         raise HTTPException(403, "Production is configured as part of an approved promotion or recreate.")
-    job_id = create_job(action="configure", environment=req.environment, vm_name=req.name, user=s.app_user,
+    job_id = create_job(action="configure", environment=req.environment, vm_name=req.name, user=who,
                         params={"profiles": vm.spec.get("profiles") or []})
 
     def work(ctx: JobContext):

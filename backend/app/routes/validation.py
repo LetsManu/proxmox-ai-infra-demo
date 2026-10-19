@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from ..auth import actor
 from ..config import get_settings
 from ..database import session_scope
 from ..models import JobStatus, VirtualMachine
@@ -47,10 +48,11 @@ def validate_member(ctx: JobContext, s, vm: VirtualMachine, env: str, *, simulat
 @router.post("/vms/validate", response_model=JobCreated, status_code=202)
 def validate(req: ValidateRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     vm = get_vm(req.name, req.environment)
     if not vm:
         raise HTTPException(404, f"VM '{req.name}' is not deployed in {req.environment}. Deploy it first.")
-    job_id = create_job(action="validate", environment=req.environment, vm_name=req.name, user=s.app_user,
+    job_id = create_job(action="validate", environment=req.environment, vm_name=req.name, user=who,
                         params=req.model_dump())
 
     def work(ctx: JobContext):
@@ -82,8 +84,9 @@ def get_suite(name: str, environment: str = "test"):
 def draft_tests(req: DraftTestsRequest):
     """Draft application tests (AI or rules). They are used only after a person approves them."""
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     vm = get_vm(req.name, req.environment)
     if not vm:
         raise HTTPException(404, f"VM '{req.name}' is not deployed in {req.environment}.")
     ai_call = ai_service.ai_caller(s, f"Write acceptance tests for VM {req.name}.") if s.ai_enabled else None
-    return test_service.draft_suite(s, vm_name=req.name, spec=vm.spec, ai_call=ai_call, user=s.app_user)
+    return test_service.draft_suite(s, vm_name=req.name, spec=vm.spec, ai_call=ai_call, user=who)

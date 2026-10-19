@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..auth import actor, require_role
 from ..config import get_settings
 from ..services import proposal_service
 
@@ -25,9 +26,11 @@ def get_proposal(pid: str):
 
 
 def _decide(pid: str, approve: bool):
+    require_role("approver")  # AI-drafted roles and tests are used only after an approver accepts them
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     try:
-        return proposal_service.decide(s, pid, approve, s.app_user)
+        return proposal_service.decide(s, pid, approve, who)
     except KeyError as exc:
         raise HTTPException(404, "Proposal not found") from exc
     except ValueError as exc:

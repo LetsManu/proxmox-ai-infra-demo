@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from ..auth import actor
 from ..config import ENVIRONMENTS, TEMPLATE_CATALOG, Settings, template_entry
 from . import software_service
 from .profile_service import load_profiles
@@ -372,7 +373,7 @@ def generate_vm_spec(settings: Settings, prompt: str) -> dict:
     )
     # Software: needs -> profiles / verified packages / reviewed role drafts
     ai_call = ai_caller(settings, prompt) if settings.ai_enabled else None
-    analysis = software_service.analyze(settings, prompt, out["spec"], ai_call=ai_call, user=settings.app_user)
+    analysis = software_service.analyze(settings, prompt, out["spec"], ai_call=ai_call, user=actor())
     try:
         out["spec"] = VmSpec(**software_service.apply_to_spec(out["spec"], analysis)).model_dump()
     except ValidationError as exc:

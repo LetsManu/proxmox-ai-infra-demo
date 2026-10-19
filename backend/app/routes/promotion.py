@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from ..auth import actor, require_role, require_second_person
 from ..config import get_settings
 from ..database import session_scope
 from ..models import Job, JobStatus
@@ -45,10 +46,15 @@ def require_validated_test_vm(name: str):
 
 
 def check_approval(req: ApprovalFields, *, action: str, word: str) -> Job:
-    """Verify an approve/reject request against an awaiting job. Raises HTTP errors."""
+    """Verify an approve/reject request against an awaiting job. Raises HTTP errors.
+
+    Only approvers decide on production changes; with AUTH_FOUR_EYES not the person who requested it.
+    """
+    require_role("approver")
     if not req.approval_job_id:
         raise HTTPException(400, "approval_job_id is required")
     job = plan_job_or_404(req.approval_job_id)
+    require_second_person(job.user)
     if job.action != action or job.status != JobStatus.AWAITING_APPROVAL:
         raise HTTPException(409, f"Job {job.id} is not an {action} awaiting approval (status: {job.status}).")
     created = job.created_at if job.created_at.tzinfo else job.created_at.replace(tzinfo=timezone.utc)
@@ -84,6 +90,7 @@ def finish_approval_job(job_id: str, status: str, note: str, user: str) -> None:
 @router.post("/vms/promote/production", response_model=JobCreated, status_code=202)
 def promote(req: PromotionRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
 
     if req.stage == "request":
         test_vm = require_validated_test_vm(req.name)
@@ -93,7 +100,7 @@ def promote(req: PromotionRequest):
                              "tags": sorted(set(spec_data.get("tags", [])) | {"promoted"})})
         except ValueError as exc:
             raise HTTPException(422, f"TEST spec is not valid for production: {exc}") from exc
-        job_id = create_job(action="promote", environment="prod", vm_name=spec.name, user=s.app_user,
+        job_id = create_job(action="promote", environment="prod", vm_name=spec.name, user=who,
                             params={"spec": spec.model_dump(), "source_vm": req.name})
 
         def work(ctx: JobContext):
@@ -109,18 +116,18 @@ def promote(req: PromotionRequest):
 
     job = check_approval(req, action="promote", word="PROMOTE")
     if req.stage == "reject":
-        finish_approval_job(job.id, JobStatus.FAILED, "rejected", s.app_user)
+        finish_approval_job(job.id, JobStatus.FAILED, "rejected", who)
         return JobCreated(job_id=job.id, status=JobStatus.FAILED)
 
     # approve: re-check the precondition at the moment of approval
     require_validated_test_vm(job.params["source_vm"])
-    finish_approval_job(job.id, JobStatus.SUCCESS, "approved", s.app_user)
+    finish_approval_job(job.id, JobStatus.SUCCESS, "approved", who)
     spec = job.params["spec"]
-    apply_id = create_job(action="promote-apply", environment="prod", vm_name=spec["name"], user=s.app_user,
-                          params={"approval_job_id": job.id, "approved_by": s.app_user})
+    apply_id = create_job(action="promote-apply", environment="prod", vm_name=spec["name"], user=who,
+                          params={"approval_job_id": job.id, "approved_by": who})
 
     def apply_work(ctx: JobContext):
-        ctx.log(f"Approved by {s.app_user} (typed PROMOTE, acknowledged production impact)")
+        ctx.log(f"Approved by {who} (typed PROMOTE, acknowledged production impact)")
         apply_plan(ctx, s, "prod", job.result["plan"], spec, vmid=job.result["vmid"],
                    template_id=job.result["template_id"])
         ctx.update_result(summary=job.result["plan"]["summary"])

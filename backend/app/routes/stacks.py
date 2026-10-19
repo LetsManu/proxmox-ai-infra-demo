@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
+from ..auth import actor
 from ..config import ENVIRONMENTS, get_settings
 from ..database import session_scope
 from ..models import JobStatus, Stack
@@ -87,6 +88,7 @@ def run_stack_plan(ctx: JobContext, s, stack: StackSpec, *, recreate: bool = Fal
 @router.post("/plan", response_model=JobCreated, status_code=202)
 def plan_stack(req: StackPlanRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     stack = req.stack
     if stack.environment != "test":
         raise HTTPException(400, "Stacks are planned in TEST. Production uses the stack promotion workflow.")
@@ -96,7 +98,7 @@ def plan_stack(req: StackPlanRequest):
     if existing and not (req.recreate or req.update):
         raise HTTPException(409, f"A stack named '{stack.name}' already exists in TEST. Choose another name, "
                                  "or change the existing stack from its page.")
-    job_id = create_job(action="stack-plan", environment="test", vm_name=stack.name, user=s.app_user,
+    job_id = create_job(action="stack-plan", environment="test", vm_name=stack.name, user=who,
                         params={"stack": stack.model_dump(), "recreate": req.recreate})
 
     def work(ctx: JobContext):
@@ -138,13 +140,14 @@ def apply_stack(ctx: JobContext, s, env: str, plan_result: dict) -> None:
 @router.post("/deploy", response_model=JobCreated, status_code=202)
 def deploy_stack(req: StackDeployRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     plan_job = plan_job_or_404(req.plan_job_id)
     if plan_job.action != "stack-plan" or plan_job.status != JobStatus.SUCCESS:
         raise HTTPException(409, "Not a successful stack plan. Plan the stack first.")
     if plan_job.result.get("applied"):
         raise HTTPException(409, "This plan was already applied. Plan the stack again.")
     name = plan_job.result["stack"]["name"]
-    job_id = create_job(action="stack-deploy", environment="test", vm_name=name, user=s.app_user,
+    job_id = create_job(action="stack-deploy", environment="test", vm_name=name, user=who,
                         params={"plan_job_id": plan_job.id})
 
     def work(ctx: JobContext):
@@ -163,10 +166,11 @@ def deploy_stack(req: StackDeployRequest):
 @router.post("/validate", response_model=JobCreated, status_code=202)
 def validate_stack(req: StackValidateRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     st = get_stack(req.name, req.environment)
     if not st:
         raise HTTPException(404, f"Stack '{req.name}' is not deployed in {req.environment}.")
-    job_id = create_job(action="stack-validate", environment=req.environment, vm_name=req.name, user=s.app_user,
+    job_id = create_job(action="stack-validate", environment=req.environment, vm_name=req.name, user=who,
                         params=req.model_dump())
 
     def work(ctx: JobContext):
@@ -210,13 +214,14 @@ def require_validated_stack(name: str) -> Stack:
 def promote_stack(req: StackPromotionRequest):
     """Whole-stack promotion: one PRODUCTION plan, one human approval (typed PROMOTE)."""
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     if req.stage == "request":
         test = require_validated_stack(req.name)
         try:
             stack = StackSpec(**{**test.spec, "environment": "prod"})
         except ValueError as exc:
             raise HTTPException(422, f"TEST stack is not valid for production: {exc}") from exc
-        job_id = create_job(action="stack-promote", environment="prod", vm_name=stack.name, user=s.app_user,
+        job_id = create_job(action="stack-promote", environment="prod", vm_name=stack.name, user=who,
                             params={"stack": stack.model_dump(), "source": req.name})
 
         def work(ctx: JobContext):
@@ -233,16 +238,16 @@ def promote_stack(req: StackPromotionRequest):
 
     job = check_approval(req, action="stack-promote", word="PROMOTE")
     if req.stage == "reject":
-        finish_approval_job(job.id, JobStatus.FAILED, "rejected", s.app_user)
+        finish_approval_job(job.id, JobStatus.FAILED, "rejected", who)
         return JobCreated(job_id=job.id, status=JobStatus.FAILED)
 
     require_validated_stack(job.params["source"])  # re-checked at the moment of approval
-    finish_approval_job(job.id, JobStatus.SUCCESS, "approved", s.app_user)
-    apply_id = create_job(action="stack-promote-apply", environment="prod", vm_name=job.vm_name, user=s.app_user,
-                          params={"approval_job_id": job.id, "approved_by": s.app_user})
+    finish_approval_job(job.id, JobStatus.SUCCESS, "approved", who)
+    apply_id = create_job(action="stack-promote-apply", environment="prod", vm_name=job.vm_name, user=who,
+                          params={"approval_job_id": job.id, "approved_by": who})
 
     def apply_work(ctx: JobContext):
-        ctx.log(f"Approved by {s.app_user} (typed PROMOTE, acknowledged production impact)")
+        ctx.log(f"Approved by {who} (typed PROMOTE, acknowledged production impact)")
         apply_stack(ctx, s, "prod", job.result)
         ctx.log("Production stack deployed. Run Validate against PRODUCTION to confirm.")
         return job.result["summary"]

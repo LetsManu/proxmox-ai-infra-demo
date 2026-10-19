@@ -1,10 +1,13 @@
 import { reactive } from 'vue'
-import { api, pollJob } from './api.js'
+import { api, onUnauthorized, pollJob, setCsrf } from './api.js'
 import { toast } from './components/ui/toast.js'
 import { openJob } from './components/ui/drawer.js'
 
 // Shared state for all screens. Loaded once, refreshed every 10 s and after each job.
 export const store = reactive({
+  authConfig: null, // { mode: none|oidc|ldap, provider_name, four_eyes }
+  me: null, // { username, display_name, roles, auth, csrf }
+  needLogin: false,
   health: null,
   pxStatus: null,
   templates: null,
@@ -19,6 +22,36 @@ export const store = reactive({
   loadError: '',
   running: [], // jobs started from this browser: [{ id, label, status, action }]
 })
+
+export const hasRole = (role) => !!store.me?.roles?.includes(role)
+
+onUnauthorized(() => { store.needLogin = true; store.me = null })
+
+/** Who is signed in. Returns false when the sign-in page must be shown. */
+export async function loadSession() {
+  try {
+    store.authConfig = await api.authConfig()
+  } catch (e) {
+    store.loadError = e.message
+    return false
+  }
+  try {
+    store.me = await api.me()
+    setCsrf(store.me.csrf)
+    store.needLogin = false
+    return true
+  } catch (e) {
+    if (e.status !== 401) store.loadError = e.message
+    store.needLogin = e.status === 401
+    return false
+  }
+}
+
+export async function signOut() {
+  try { await api.logout() } catch { /* already gone */ }
+  setCsrf('')
+  Object.assign(store, { me: null, needLogin: true, vms: null, stacks: null, history: null, awaiting: [], proposals: [] })
+}
 
 export async function loadStatic() {
   try {
@@ -35,6 +68,7 @@ export async function loadStatic() {
 }
 
 export async function refresh() {
+  if (!store.me) return
   try {
     const [vms, stacks, history, awaiting, proposals] = await Promise.all([
       api.vms(), api.stacks(), api.history(), api.jobs({ status: 'awaiting_approval', limit: 20 }),

@@ -1,11 +1,21 @@
 // All calls go to the backend under /api. The browser never sees Proxmox credentials.
 
+// Session: HttpOnly cookie set by the backend. Writes echo the session's CSRF token.
+let csrf = ''
+let unauthorized = () => {}
+export const setCsrf = (t) => { csrf = t || '' }
+export const onUnauthorized = (fn) => { unauthorized = fn }
+
 async function request(method, path, body) {
   let res
+  const headers = {}
+  if (body) headers['Content-Type'] = 'application/json'
+  if (method !== 'GET' && csrf) headers['X-CSRF-Token'] = csrf
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers,
+      credentials: 'same-origin',
       body: body ? JSON.stringify(body) : undefined,
     })
   } catch {
@@ -14,6 +24,7 @@ async function request(method, path, body) {
     throw err
   }
   const data = await res.json().catch(() => ({}))
+  if (res.status === 401 && !path.startsWith('/auth/')) unauthorized()
   if (!res.ok) {
     const err = new Error(formatError(data.detail) || `${res.status} ${res.statusText}`)
     err.status = res.status
@@ -39,6 +50,10 @@ const q = (o) => {
 }
 
 export const api = {
+  authConfig: () => request('GET', '/auth/config'),
+  me: () => request('GET', '/auth/me'),
+  login: (username, password) => request('POST', '/auth/login', { username, password }),
+  logout: () => request('POST', '/auth/logout'),
   health: () => request('GET', '/health'),
   proxmoxStatus: () => request('GET', '/proxmox/status'),
   templates: () => request('GET', '/templates'),

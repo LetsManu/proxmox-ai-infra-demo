@@ -1,13 +1,17 @@
 <script setup>
 import { computed } from 'vue'
-import { Layers, FlaskConical, Radio, Menu, Moon, Sun, ListTodo, User } from 'lucide-vue-next'
-import { store, isMock } from '../store.js'
+import { Layers, FlaskConical, Radio, Menu, Moon, Sun, ListTodo, User, LogOut } from 'lucide-vue-next'
+import { store, isMock, signOut } from '../store.js'
 import { openJob } from '../components/ui/drawer.js'
 
 defineProps({ navOpen: { type: Boolean, default: false } })
 const emit = defineEmits(['toggle-nav'])
 const theme = defineModel('theme', { type: String, default: 'light' })
 const running = computed(() => store.running)
+const roleLabel = computed(() => {
+  const r = store.me?.roles || []
+  return r.includes('approver') ? 'Approver' : r.includes('operator') ? 'Operator' : r.includes('viewer') ? 'Viewer' : ''
+})
 </script>
 
 <template>
@@ -44,7 +48,12 @@ const running = computed(() => store.running)
       >
         <Sun v-if="theme === 'dark'" :size="18" /><Moon v-else :size="18" />
       </button>
-      <span v-if="store.health" class="user small hide-sm" :title="`Signed in as ${store.health.settings.user}`"><User :size="15" />{{ store.health.settings.user }}</span>
+      <span v-if="store.me" class="user small hide-sm" :title="`Signed in as ${store.me.username} (${store.me.roles.join(', ')})`">
+        <User :size="15" />{{ store.me.display_name }}<span class="role">{{ roleLabel }}</span>
+      </span>
+      <button v-if="store.me?.auth" type="button" class="btn quiet icon" aria-label="Sign out" title="Sign out" @click="signOut">
+        <LogOut :size="18" />
+      </button>
     </div>
   </header>
 </template>
@@ -67,6 +76,7 @@ const running = computed(() => store.running)
 .tasks .t { overflow: hidden; text-overflow: ellipsis; }
 .idle, .user { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); white-space: nowrap; }
 .user { color: var(--mut); padding-left: 8px; border-left: 1px solid var(--line); }
+.role { font-size: 12px; font-weight: 600; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
 @media (max-width: 1024px) { .nav-btn { display: inline-flex; } }
 @media (max-width: 640px) { .hide-sm, .mode .t, .tasks .t { display: none; } }
 </style>

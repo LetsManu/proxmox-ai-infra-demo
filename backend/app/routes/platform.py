@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from ..auth import actor, require_role
 from ..config import get_settings
 from ..models import JobStatus
 from ..schemas import JobCreated, PlatformApplyRequest
@@ -28,7 +29,8 @@ def platform_status():
 @router.post("/plan", response_model=JobCreated, status_code=202)
 def platform_plan():
     s = get_settings()
-    job_id = create_job(action="platform-plan", environment="infra", vm_name="platform", user=s.app_user, params={})
+    who = actor()  # captured now: jobs run in worker threads
+    job_id = create_job(action="platform-plan", environment="infra", vm_name="platform", user=who, params={})
 
     def work(ctx: JobContext):
         templates = platform_service.desired_templates(s)
@@ -45,7 +47,9 @@ def platform_plan():
 
 @router.post("/apply", response_model=JobCreated, status_code=202)
 def platform_apply(req: PlatformApplyRequest):
+    require_role("approver")  # creates storage, templates and networks for both environments
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     plan_job = plan_job_or_404(req.plan_job_id)
     if plan_job.action != "platform-plan" or plan_job.status != JobStatus.SUCCESS:
         raise HTTPException(409, "Not a successful platform plan. Plan the platform first.")
@@ -54,7 +58,7 @@ def platform_apply(req: PlatformApplyRequest):
     plan = plan_job.result["plan"]
     if plan["has_destroy"] and not req.confirm_destroy:
         raise HTTPException(400, "This platform plan destroys resources; confirm it explicitly.")
-    job_id = create_job(action="platform-apply", environment="infra", vm_name="platform", user=s.app_user,
+    job_id = create_job(action="platform-apply", environment="infra", vm_name="platform", user=who,
                         params={"plan_job_id": plan_job.id})
 
     def work(ctx: JobContext):

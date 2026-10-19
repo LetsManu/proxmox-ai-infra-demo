@@ -14,8 +14,9 @@ import StackDetail from './views/StackDetail.vue'
 import ReviewQueue from './views/ReviewQueue.vue'
 import PlatformView from './views/PlatformView.vue'
 import ActivityView from './views/ActivityView.vue'
+import LoginView from './views/LoginView.vue'
 import { route } from './router.js'
-import { loadStatic, refresh, store } from './store.js'
+import { hasRole, loadSession, loadStatic, refresh, store } from './store.js'
 
 const VIEWS = {
   dashboard: DashboardView, 'vm-new': VmWizard, vm: VmDetail, stacks: StacksView, 'stack-new': StackWizard,
@@ -34,14 +35,19 @@ watch(theme, (t) => {
 }, { immediate: true })
 
 let timer
-onMounted(() => {
-  loadStatic()
+onMounted(async () => {
+  if (await loadSession()) loadStatic()
   timer = setInterval(refresh, 10000)
 })
 onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
+  <template v-if="store.needLogin">
+    <LoginView />
+    <ToastHost />
+  </template>
+  <template v-else>
   <a class="skip" href="#main">Skip to content</a>
   <AppHeader v-model:theme="theme" :nav-open="navOpen" @toggle-nav="navOpen = !navOpen" />
   <div class="shell">
@@ -50,16 +56,23 @@ onUnmounted(() => clearInterval(timer))
     </aside>
     <div v-if="navOpen" class="side-scrim" aria-hidden="true" @click="navOpen = false" />
     <main id="main" class="main" tabindex="-1">
+      <div v-if="store.me && !store.me.auth" class="callout warn boot" role="note">
+        <span><strong>No sign-in configured.</strong> Everyone who can open this page acts as {{ store.me.username }} with every role. Set <code>AUTH_MODE=oidc</code> or <code>ldap</code> before others use the console (docs/authentication.md).</span>
+      </div>
+      <div v-if="store.me?.auth && !hasRole('operator')" class="callout boot" role="note">
+        <span><strong>Read-only access.</strong> You can see everything; changes need the operator role, production approvals the approver role.</span>
+      </div>
       <div v-if="store.loadError && !store.health" class="callout err boot" role="alert">
         <span><strong>The console backend is not reachable.</strong> {{ store.loadError }}</span>
       </div>
       <component :is="view" :key="viewKey" />
-      <footer class="foot dim small">Proxmox credentials never reach the browser. Production changes always need a person to approve them.</footer>
+      <footer class="foot dim small">Proxmox credentials never reach the browser. Production changes always need a person to approve them.<span v-if="store.health?.version"> · v{{ store.health.version }}</span></footer>
     </main>
   </div>
   <DrawerHost />
   <ModalHost />
   <ToastHost />
+  </template>
 </template>
 
 <style scoped>

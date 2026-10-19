@@ -9,12 +9,14 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import Expandable from '../components/ui/Expandable.vue'
 import ProposalView from '../components/ProposalView.vue'
 import { api } from '../api.js'
-import { refresh, store } from '../store.js'
+import { refresh, store, hasRole } from '../store.js'
 import { ask } from '../components/ui/modal.js'
 import { toast } from '../components/ui/toast.js'
 import { openDrawer } from '../components/ui/drawer.js'
 import { reviewAndApprove, rejectRequest } from '../production.js'
 import { ACTION_LABEL, ENV_LABEL, relTime } from '../components/ui/format.js'
+
+const canApprove = computed(() => hasRole('approver'))
 
 const decided = ref(null)
 async function loadDecided() {
@@ -78,8 +80,8 @@ const draftRows = computed(() => store.proposals)
       <template #cell-when="{ row }">{{ relTime(row.created_at) }}</template>
       <template #cell-act="{ row }">
         <div class="row nowrap">
-          <button type="button" class="btn sm primary" @click="approveProd(row)">Review and approve</button>
-          <button type="button" class="btn sm" @click="rejectProd(row)">Reject</button>
+          <button type="button" class="btn sm primary" :disabled="!canApprove" :title="canApprove ? '' : 'Needs the approver role'" @click="approveProd(row)">Review and approve</button>
+          <button type="button" class="btn sm" :disabled="!canApprove" @click="rejectProd(row)">Reject</button>
         </div>
       </template>
     </DataTable>
@@ -98,8 +100,8 @@ const draftRows = computed(() => store.proposals)
       <template #cell-act="{ row }">
         <div class="row nowrap">
           <button type="button" class="btn sm" @click="open(row)">Show details</button>
-          <button type="button" class="btn sm primary" :disabled="!row.review.ok" @click="decide(row, true)">Approve</button>
-          <button type="button" class="btn sm quiet" @click="decide(row, false)">Reject</button>
+          <button type="button" class="btn sm primary" :disabled="!row.review.ok || !canApprove" :title="canApprove ? '' : 'Needs the approver role'" @click="decide(row, true)">Approve</button>
+          <button type="button" class="btn sm quiet" :disabled="!canApprove" @click="decide(row, false)">Reject</button>
         </div>
       </template>
     </DataTable>

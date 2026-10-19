@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..auth import actor
 from ..config import ENVIRONMENTS, Settings, get_settings
 from ..database import session_scope
 from ..models import HistoryEntry, Job, VirtualMachine
@@ -201,8 +202,9 @@ def plan_job_or_404(job_id: str) -> Job:
 @router.post("/vms/plan", response_model=JobCreated, status_code=202)
 def create_plan(req: PlanRequest):
     s = get_settings()
+    who = actor()  # captured now: jobs run in worker threads
     spec = req.spec
-    job_id = create_job(action="plan", environment=spec.environment, vm_name=spec.name, user=s.app_user,
+    job_id = create_job(action="plan", environment=spec.environment, vm_name=spec.name, user=who,
                         params={"spec": spec.model_dump()})
 
     def work(ctx: JobContext):

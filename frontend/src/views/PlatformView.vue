@@ -9,10 +9,12 @@ import StatusCard from '../components/ui/StatusCard.vue'
 import ErrorPanel from '../components/ui/ErrorPanel.vue'
 import PlanReview from '../components/PlanReview.vue'
 import { api } from '../api.js'
-import { refreshPlatform, runJob, store } from '../store.js'
+import { refreshPlatform, runJob, store, hasRole } from '../store.js'
 import { ask } from '../components/ui/modal.js'
 import { toast } from '../components/ui/toast.js'
 import { openJob } from '../components/ui/drawer.js'
+
+const canApprove = computed(() => hasRole('approver'))
 
 const plan = ref(null)
 const current = ref(null)
@@ -52,7 +54,7 @@ onMounted(refreshPlatform)
   <PageHeader title="Platform" subtitle="Everything the console needs on the Proxmox side, and who creates it.">
     <button type="button" class="btn quiet" @click="refreshPlatform"><RefreshCw :size="16" />Refresh</button>
     <button v-if="!plan" type="button" class="btn" :class="{ primary: p?.needs_platform_apply }" :disabled="current && ['queued', 'running'].includes(current.status)" @click="makePlan"><FileCode :size="16" />Check what is missing</button>
-    <button v-else type="button" class="btn primary" :disabled="!plan.result.plan.changes.length" @click="apply"><Hammer :size="16" />Prepare platform</button>
+    <button v-else type="button" class="btn primary" :disabled="!plan.result.plan.changes.length || !canApprove" :title="canApprove ? '' : 'Applying the platform needs the approver role'" @click="apply"><Hammer :size="16" />Prepare platform</button>
   </PageHeader>
 
   <div v-if="p" class="callout" :class="p.ready ? 'ok' : p.needs_bootstrap ? 'err' : 'warn'" role="status">

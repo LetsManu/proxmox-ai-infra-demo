@@ -23,6 +23,36 @@ class Settings(BaseSettings):
     app_user: str = "demo-operator"
     cors_origins: str = "http://localhost:8080,http://localhost:5173"
 
+    # --- Sign-in (docs/authentication.md) ----------------------------------
+    # none: no login, everyone acts as APP_USER with every role (demo / single admin on localhost only)
+    # oidc: Authentik, Microsoft Entra ID, AD FS, Keycloak, ...   ldap: Active Directory, OpenLDAP, Authentik LDAP outpost
+    auth_mode: str = "none"
+    auth_provider_name: str = ""  # login button label, e.g. "Authentik" or "Microsoft"
+    # Group names, DNs or IDs (Entra object IDs) per role, separated by ";" (DNs contain commas). Approver includes operator includes viewer.
+    auth_viewer_groups: str = ""
+    auth_operator_groups: str = ""
+    auth_approver_groups: str = ""
+    auth_four_eyes: bool = False  # production approvals must come from someone other than the requester
+    auth_session_hours: int = 8
+    auth_cookie_secure: bool = True  # false only for plain-HTTP lab setups
+    public_url: str = "http://localhost:8080"  # how browsers reach the console (OIDC redirect URI)
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: SecretStr = SecretStr("")
+    oidc_scopes: str = "openid profile email"
+    oidc_username_claim: str = "preferred_username"
+    oidc_groups_claim: str = "groups"  # Entra ID: "groups" (object IDs) or "roles" (app roles)
+    ldap_url: str = ""  # ldaps://dc01.example.internal:636 (or ldap:// with LDAP_START_TLS=true)
+    ldap_start_tls: bool = False
+    ldap_ca_file: str = ""  # CA certificate (PEM) for the directory's TLS certificate; empty = system CAs
+    ldap_bind_dn: str = ""  # service account used to look users up
+    ldap_bind_password: SecretStr = SecretStr("")
+    ldap_base_dn: str = ""
+    ldap_user_filter: str = "(&(objectClass=user)(sAMAccountName={username}))"  # OpenLDAP: (uid={username})
+    ldap_group_attribute: str = "memberOf"
+    ldap_nested_groups: bool = False  # Active Directory only: resolve nested groups (LDAP_MATCHING_RULE_IN_CHAIN)
+    ldap_display_name_attribute: str = "displayName"
+
     # --- Persistence ------------------------------------------------------
     database_url: str = "sqlite:////data/app.db"
     workspace_dir: str = "/workspace"
@@ -187,7 +217,8 @@ def placement(settings: Settings, env: str) -> dict:
 
 
 # Secrets that may be supplied as Docker secrets: VAR_FILE=/run/secrets/<name> wins over VAR.
-SECRET_FILE_VARS = ("PROXMOX_TOKEN_SECRET", "ANTHROPIC_API_KEY", "WINDOWS_ADMIN_PASSWORD")
+SECRET_FILE_VARS = ("PROXMOX_TOKEN_SECRET", "ANTHROPIC_API_KEY", "WINDOWS_ADMIN_PASSWORD", "OIDC_CLIENT_SECRET",
+                    "LDAP_BIND_PASSWORD")
 
 
 def _secret_file_overrides() -> dict:
@@ -219,7 +250,6 @@ def public_settings(settings: Settings) -> dict:
         "iac_binary": settings.iac_binary,
         "ai_provider": settings.ai_provider if settings.ai_enabled else "local-fallback",
         "ai_model": settings.ai_model if settings.ai_enabled else None,
-        "user": settings.app_user,
     }
 
 

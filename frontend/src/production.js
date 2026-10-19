@@ -2,7 +2,7 @@
 // The backend enforces every rule (validated TEST source, 60-minute window, acknowledge flag,
 // typed word); the modal only collects the human decision.
 import { api } from './api.js'
-import { runJob, store } from './store.js'
+import { hasRole, runJob, store } from './store.js'
 import { ask } from './components/ui/modal.js'
 import { toast } from './components/ui/toast.js'
 
@@ -42,7 +42,22 @@ function effects(job) {
 }
 
 /** Show the production modal; on confirm, apply the reviewed plan. Returns the apply job or null. */
+const NEEDS_APPROVER = 'Only approvers can decide on production changes. Ask someone in the approver group.'
+
+function mayDecide(job) {
+  if (!hasRole('approver')) {
+    toast.error(NEEDS_APPROVER, { title: 'Approver role needed' })
+    return false
+  }
+  if (store.authConfig?.four_eyes && job.user?.toLowerCase() === store.me?.username?.toLowerCase()) {
+    toast.error('Four-eyes rule: someone other than the requester must decide.', { title: 'Second person needed' })
+    return false
+  }
+  return true
+}
+
 export async function reviewAndApprove(job, { onUpdate } = {}) {
+  if (!mayDecide(job)) return null
   const k = KIND[job.action]
   const ok = await ask({
     title: k.title(job),
@@ -61,6 +76,7 @@ export async function reviewAndApprove(job, { onUpdate } = {}) {
 }
 
 export async function rejectRequest(job) {
+  if (!mayDecide(job)) return false
   const k = KIND[job.action]
   const ok = await ask({
     title: 'Reject this production request?',
