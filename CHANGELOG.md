@@ -14,7 +14,7 @@ Sign-in with your directory, and releases that install in a few minutes.
 - Tested against OpenLDAP (LDAPS and StartTLS), Samba Active Directory (nested groups, UPN) and Authentik (OIDC, real browser). Found and fixed on the way: wrong passwords answered with 502 and were not counted, OpenLDAP groups were not read (`memberOf` is operational), and the four-eyes rule could be bypassed on AD by signing in once by name and once by UPN.
 
 **Install, upgrade, backup**
-- Releases: tag `vX.Y.Z` (or `-rc.N`) runs the full CI, publishes backend and frontend images to ghcr.io with SBOM and provenance, and attaches an install archive with its SHA-256.
+- Releases ([docs/releasing.md](docs/releasing.md)): *Actions → Release → Run workflow* with a version (or a pushed tag `vX.Y.Z` / `-rc.N`) runs the full CI, publishes backend and frontend images to ghcr.io with SBOM and provenance, creates the tag on the tested commit and attaches an install archive with its SHA-256.
 - `scripts/install.sh` asks for Proxmox and sign-in, writes `.env` (mode 600) and `secrets/` (owned by uid 10001), pulls the images and waits until the console is healthy. `--build` builds locally, `--non-interactive` reads answers from the environment.
 - `scripts/upgrade.sh` backs up first, creates secret files new releases expect, lists new settings, pulls and restarts.
 - `scripts/backup.sh` / `scripts/restore.sh` (`python -m app.cli backup|verify|restore`): database (online copy), OpenTofu state, approved AI roles and SSH host keys; no secrets, no sessions. Restore refuses links and paths outside the data directories and checks the database before replacing anything.

@@ -120,7 +120,8 @@ Test machines are **linked clones**, so the template and Test disks must be on t
 
 On the console host, either install a **release** (recommended) or work from a git checkout.
 
-**Release.** Download `proxmox-ai-infra-<version>.tar.gz` and its `.sha256` from the GitHub release page, then:
+**Release.** Download `proxmox-ai-infra-<version>.tar.gz` and its `.sha256` from the
+[releases page](https://github.com/LetsManu/proxmox-ai-infra-demo/releases) (newest: `v2.1.0-rc.1`), then:
 
 ```bash
 sha256sum -c proxmox-ai-infra-<version>.tar.gz.sha256
@@ -653,6 +654,7 @@ Then continue with step 6. Set `POOL_ID=` (empty) if you didn't create a pool, a
 | Cloud images and templates | [docs/cloud-images.md](docs/cloud-images.md) |
 | Windows template | [docs/windows-template.md](docs/windows-template.md) |
 | Sign-in (Authentik, Entra ID, AD FS, Active Directory, LDAP) and roles | [docs/authentication.md](docs/authentication.md) |
+| Releases, versions, registry access, rollback | [docs/releasing.md](docs/releasing.md) |
 | Software profiles, packages, Ansible | [docs/configuration.md](docs/configuration.md) |
 | Stacks, LXC, Docker services | [docs/stacks.md](docs/stacks.md) |
 | Automated tests and review queue | [docs/testing.md](docs/testing.md) |

@@ -111,7 +111,8 @@ More detail: [docs/architecture.md](docs/architecture.md).
 
 ## Install a release
 
-Each release on GitHub has an install archive and images on `ghcr.io`. On the console host (Docker with Compose v2):
+Each [release](https://github.com/LetsManu/proxmox-ai-infra-demo/releases) has an install archive and, from 2.1.0 on,
+images on `ghcr.io`. Download the archive and its `.sha256` on the console host (Docker with Compose v2):
 
 ```bash
 sha256sum -c proxmox-ai-infra-<version>.tar.gz.sha256
@@ -121,6 +122,7 @@ scripts/install.sh            # asks for Proxmox and sign-in, writes .env and se
 
 The full path from a bare Proxmox node to the first production VM is in [OVERVIEW.md](OVERVIEW.md). For a private
 repository, `docker login ghcr.io` with a token that has `read:packages` first (or `scripts/install.sh --build`).
+How releases are made, versioned and verified: [docs/releasing.md](docs/releasing.md).
 
 ## Quick start (mock mode, 2 minutes)
 
@@ -312,9 +314,13 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 
 # IaC
 cd infra && tofu fmt -check -recursive && tofu init -backend=false && tofu validate
+cd infra/modules/vm && tofu init && tofu test   # plan checks with a mocked Proxmox provider
+
+# Sign-in locally: AUTH_MODE=none (default) needs nothing; for LDAP/OIDC see docs/authentication.md
 ```
 
 Enable the secret-scanning pre-commit hook once: `git config core.hooksPath .githooks` (needs [gitleaks](https://github.com/gitleaks/gitleaks)).
+Releases: bump the version, then *Actions → Release → Run workflow* ([docs/releasing.md](docs/releasing.md)).
 
 ## Troubleshooting
 

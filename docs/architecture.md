@@ -12,20 +12,23 @@ flowchart TB
         proxy["/api reverse proxy"]
     end
     subgraph be["backend container (FastAPI, uid 10001, read-only)"]
-        routes["routes/<br/>vms · plans · validation · promotion · stacks · proposals · platform · ai"]
+        authmw["auth middleware<br/>session · CSRF · roles"]
+        routes["routes/<br/>auth · vms · plans · validation · promotion · stacks · proposals · platform · ai"]
         runner["workers/job_runner<br/>thread pool + per-env lock"]
         svc_px["proxmox_service<br/>(live | mock)"]
         svc_tf["terraform_service<br/>(live | mock)"]
         svc_val["validation_service"]
         svc_ai["ai_service<br/>guardrails + local fallback"]
-        db[("SQLite (WAL)<br/>jobs · virtual_machines · stacks · proposals · history")]
+        db[("SQLite (WAL)<br/>jobs · virtual_machines · stacks · proposals · history · auth_sessions")]
     end
+    idp["Directory<br/>OIDC (Authentik, Entra ID, AD FS) or LDAP (AD, OpenLDAP)"]
     ws[("workspace volume<br/>test/ prod/ state/")]
     pve["Proxmox VE API"]
     claude["Claude API"]
 
     ui --> static
-    ui --> proxy --> routes
+    ui --> proxy --> authmw --> routes
+    routes -- "sign-in" --> idp
     routes --> runner
     runner --> svc_tf --> ws
     runner --> svc_val --> svc_px
@@ -55,9 +58,41 @@ VM: SSH for Linux, WinRM for Windows, base role plus the VM's profiles.
 | `virtual_machines` | Desired state per (name, environment): spec, VM ID, IP, last validation. Rendered into OpenTofu `var.vms`. |
 | `stacks` | Stacks per environment: spec (components, Docker services), member names, last validation |
 | `proposals` | AI drafts waiting for review: software roles and test suites, automated check results, decision and approver |
-| `history` | Audit trail: timestamp, resource, environment, action, status, user, plan summary |
+| `history` | Audit trail: timestamp, resource, environment, action, status, user, plan summary; sign-ins too |
+| `auth_sessions` | Signed-in browsers: SHA-256 of the cookie token, user, roles, CSRF token, expiry. Never in backups. |
 
 SQLite is enough for one backend replica (WAL mode + busy timeout). SQLAlchemy keeps the code portable: switching to PostgreSQL is a `DATABASE_URL` change.
+
+## Sign-in and roles
+
+`app/auth` resolves the user for every `/api` request (details and setup: [authentication.md](authentication.md)):
+
+1. **Sign-in.** OIDC: `/api/auth/login` redirects to the provider (PKCE, `state`, `nonce`); `/api/auth/callback` checks
+   the ID token against the provider's keys and reads groups from the token or userinfo. LDAP: `POST /api/auth/login`
+   looks the user up with the service account and binds as the user over TLS.
+2. **Roles** come from the groups (`AUTH_*_GROUPS`): viewer ⊂ operator ⊂ approver. Nobody without a group gets a session.
+3. **Session.** A random token goes into an `HttpOnly`, `SameSite=Lax` cookie; the database stores its SHA-256, the
+   roles and a CSRF token. Roles change at the next sign-in.
+4. **Every request.** No session → 401 (except `/api/health` and `/api/auth/*`). A write needs the operator role and the
+   `X-CSRF-Token` header. Approving or rejecting production changes, applying the platform stack and deciding on AI drafts
+   call `require_role("approver")`; `AUTH_FOUR_EYES` adds `require_second_person(job.user)`.
+5. **Audit.** The route records the signed-in user (`actor()`) in the job before it hands work to the job runner, so
+   history and approvals name the person, not a service account.
+
+`AUTH_MODE=none` skips steps 1–4: every request is `APP_USER` with all roles, and the UI shows a warning.
+
+## Backup and restore
+
+`python -m app.cli backup|verify|restore` (wrapped by `scripts/backup.sh` and `scripts/restore.sh`):
+
+| In the archive | Not in the archive |
+|---|---|
+| SQLite online copy (WAL folded in, `auth_sessions` emptied) | secrets (`secrets/`, `.env`) |
+| `workspace/state/` (OpenTofu state: test, prod, platform) | provider caches and plan files (re-created by the next plan) |
+| `workspace/profiles/` (approved AI roles), `workspace/known_hosts/` | Ansible run directories |
+
+A restore refuses links, absolute paths and entries outside these folders, checks the database, then replaces the data
+and deletes old plan files. Proxmox itself is not touched; the next plan shows any difference.
 
 ## Desired state and OpenTofu
 
@@ -90,6 +125,7 @@ Approval creates a separate `promote-apply` / `recreate-apply` job that applies 
 ```mermaid
 sequenceDiagram
     actor Op as Operator
+    actor Ap as Approver
     participant UI
     participant API
     participant Tofu as OpenTofu (prod state)
@@ -101,9 +137,9 @@ sequenceDiagram
     API-->>UI: job awaiting_approval (plan)
     UI->>AI: summarize-plan (prod)
     AI-->>UI: risk + checks (advisory)
-    Op->>UI: tick acknowledgement, type PROMOTE
+    Ap->>UI: tick acknowledgement, type PROMOTE
     UI->>API: {stage: approve, approval_job_id, acknowledge, confirmation}
-    API->>API: re-check all gates, plan age < 60 min, not already decided
+    API->>API: approver role, four-eyes (optional), re-check all gates, plan age < 60 min, not already decided
     API->>Tofu: apply saved plan
     API-->>UI: promote-apply job (logs)
 ```
