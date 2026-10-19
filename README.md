@@ -96,7 +96,7 @@ More detail: [docs/architecture.md](docs/architecture.md).
 - **History**: every plan, deploy, validation and approval with user and plan summary.
 - **Platform**: shows every resource the console depends on (networks, storage, pool, templates) and who creates it; *Check what is missing* plans the platform stack, *Prepare platform* applies it (cloud images, VM templates, LXC templates).
 - **Software per project**: profiles are discovered from Ansible role folders (built-in plus a project `profiles/` folder, re-read live), plus free-form apt/Chocolatey packages per VM. Ansible installs them after deploy, recreate and promotion; *Configure* re-runs it; validation checks it. See [docs/configuration.md](docs/configuration.md).
-- **Windows Server 2022** alongside Ubuntu 24.04 and Debian 12 (Windows template provided once, see [docs/windows-template.md](docs/windows-template.md)).
+- **Windows Server 2022** alongside Ubuntu 24.04 and Debian 12 (Windows template provided once, see [docs/windows-template.md](docs/windows-template.md)). Template, cloud-init clone, Ansible configuration and Windows tests were run end to end on an emulated Proxmox-style VM; see [what was verified](docs/windows-template.md#verification).
 
 ## Prerequisites
 
@@ -275,6 +275,8 @@ Enable the secret-scanning pre-commit hook once: `git config core.hooksPath .git
 | Ansible `UNREACHABLE` | VM not reachable from the console host (firewall/VLAN routing), WinRM listener missing | Check routing from the Docker host to the VM VLANs; see docs/windows-template.md |
 | Validation: no IP | `qemu-guest-agent` missing in the image, or no DHCP on the VLAN | Rebuild the template with `--install-agent`; check DHCP |
 | Validation: cloud-init not completed | No DNS/internet on the test VLAN, broken snippet | `cloud-init status --long` on the VM console |
+| Windows: *WinRM HTTPS 5986 is not open* | cloudbase-init has not finished, or `metadata_services` is not `ConfigDriveService` | cloudbase-init log on COM1 / `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\log`; see docs/windows-template.md |
+| Windows baseline: *Unencrypted WinRM (5985)* fails | Template still has the HTTP listener | Add the `LocalScripts` line from docs/windows-template.md step 4 and rebuild the template |
 | `Saved plan is stale` | State changed between plan and apply | Create a new plan |
 | `VM ID … outside the allowed range` | Wrong environment/tfvars | Check `environments/*.tfvars` |
 | Assistant shows *Local rules* | No key, `AI_PROVIDER=none`, or provider unreachable | Expected offline; set `AI_PROVIDER=anthropic` + key |

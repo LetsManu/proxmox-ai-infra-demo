@@ -52,6 +52,7 @@ Expected result: a Proxmox template with VMID `TEMPLATE_WINDOWS_2022_ID` (defaul
    In `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf\cloudbase-init.conf` and `cloudbase-init-unattend.conf`
    set `metadata_services=cloudbaseinit.metadata.services.configdrive.ConfigDriveService` and keep
    `inject_user_password=true` so the password from Proxmox (cloud-init `cipassword`) is applied.
+   Keep the default `plugins` list: it contains `ConfigWinRMListenerPlugin` (HTTPS listener) and `LocalScriptsPlugin`.
 5. Generalize and shut down with cloudbase-init's unattend file:
    ```powershell
    cd 'C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf'
@@ -68,6 +69,35 @@ The **Platform** page then shows `9002 (Windows Server 2022)` as present.
   cloudbase-init as the Administrator password, Ansible uses it for WinRM. It is never written to disk by the console
   and is masked in job logs.
 - Windows computer names are limited to 15 characters; the API rejects longer names.
+
+## Verification
+
+The whole Windows path was run once on **2026-10-18** with Windows Server 2022 (evaluation ISO, Server Core) on a VM
+built like this template: q35, OVMF, `x86-64-v2-AES` CPU flags, VirtIO SCSI disk, virtio-net, guest agent channel,
+`ostype win11`. The steps above were followed; the clone was a linked clone with a cloud-init drive in Proxmox's
+`configdrive2` layout (`openstack/latest/meta_data.json` with `admin_pass`, attached as `ide2`).
+
+| Step | Result |
+|---|---|
+| Template: VirtIO drivers, guest agent, cloudbase-init, sysprep | OK; the clone boots from VirtIO SCSI after sysprep |
+| Guest agent on the clone (`network-get-interfaces`, `get-osinfo`) as parsed by the console | IPv4 of the NIC; loopback, IPv6 and link-local skipped; `Windows Server 2022 Standard Evaluation` |
+| cloudbase-init reads the config drive | hostname, Administrator password (`admin_pass`), new WinRM HTTPS certificate per clone |
+| `site.yml` through the console's `configure_vm` (profiles `iis`, `windows_tools`, package `jq`) | `failed=0` |
+| `tests.yml` through the console's test runner: security baseline, profile checks, AI-style checks of every Windows type, negative controls | all expected results |
+
+Found and fixed during the run (see CHANGELOG 2.0.3): link-local addresses taken as the guest IP; the guest agent
+answering minutes before cloudbase-init has set the password (validation now waits for WinRM 5986); the WinRM
+certificate made in the template and shared by every clone; the 5985 listener; check results lost for all-digit check
+ids; the cloud-init format now set explicitly to `configdrive2`.
+
+Not covered by that run, check these on your Proxmox host:
+
+- It ran under QEMU without KVM, outside Proxmox. Proxmox API calls (clone, cloud-init drive creation, start) were not
+  exercised; the OpenTofu module's request is covered by `tofu test` in `infra/modules/vm` (mocked provider).
+- The guest reached the console through port forwarding, so checks from the console against ports measure the
+  forwarding, not your VLAN firewall.
+- Timing: emulation is far slower than KVM. Measured there: guest agent answering about 6.5 minutes before the
+  password was set. On Proxmox the gaps are shorter; the order (agent first) is expected to stay.
 
 ## Licensing
 

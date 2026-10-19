@@ -319,7 +319,7 @@ Click **Check what is missing**.
 
 You can do any of these now or later.
 
-- **Windows Server 2022.** There is no redistributable cloud image, so an administrator builds template `9002` once: [docs/windows-template.md](docs/windows-template.md). Requirements: VirtIO drivers, QEMU guest agent, cloudbase-init, WinRM over HTTPS (5986), sysprep. Put a 12+ character password in `secrets/windows_admin_password`, then restart the backend: `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d backend`.
+- **Windows Server 2022.** There is no redistributable cloud image, so an administrator builds template `9002` once: [docs/windows-template.md](docs/windows-template.md). Requirements: VirtIO drivers, QEMU guest agent, cloudbase-init (reads the `configdrive2` cloud-init drive and creates the WinRM HTTPS listener with a new certificate on every clone), no unencrypted WinRM 5985, sysprep. Do not create the WinRM certificate in the template. Put a 12+ character password in `secrets/windows_admin_password`, then restart the backend: `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d backend`.
 - **AI assistance (Claude).** Set `AI_PROVIDER=anthropic` in `.env`, put the key in `secrets/anthropic_api_key` and restart the backend. Drafts, plan reviews and diagnoses then say *Claude* instead of *local rules*. The AI can draft and explain, never deploy or approve: [docs/ai-operations.md](docs/ai-operations.md).
 - **Project software.** Put your own Ansible roles, each with a `profile.yml`, into `profiles/` (or point `PROFILES_DIR` at another folder). Click **Refresh catalog** in the Software step and they appear. See [profiles/README.md](profiles/README.md) and [docs/configuration.md](docs/configuration.md).
 

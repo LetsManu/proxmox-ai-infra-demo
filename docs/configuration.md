@@ -61,8 +61,8 @@ Folder names must match `^[a-z][a-z0-9_]{1,40}$`; built-in roles win on name cla
 |---|---|---|
 | Transport | SSH (`ansible_user` = `CI_USER`) | WinRM HTTPS 5986, NTLM |
 | Credential | private key in `ANSIBLE_SSH_KEY_FILE` (Docker secret `ansible_ssh_key`), public half in `DEFAULT_SSH_PUBLIC_KEY` | `WINDOWS_ADMIN_PASSWORD` (Docker secret), set at first boot by cloudbase-init |
-| Host keys | pinned per VM (`accept-new`), forgotten on recreate | self-signed listener (pin a CA in production) |
-| Waits for | SSH + `cloud-init status --wait` | WinRM answering (up to 15 min) |
+| Host keys | pinned per VM (`accept-new`), forgotten on recreate | self-signed listener, new certificate per clone from cloudbase-init (pin a CA in production) |
+| Waits for | SSH + `cloud-init status --wait` | validation: guest agent, then WinRM 5986 open; Ansible: WinRM login works (up to 15 min) |
 
 The inventory holds only the VM's IP (from the QEMU guest agent), its group and the profile list.
 Passwords are read by Ansible from the environment, never written to disk, and masked in job logs.

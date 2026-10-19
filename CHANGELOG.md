@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.0.3 – 2026-10-19
+
+Windows Server 2022 run end to end: template built per `docs/windows-template.md`, linked clone with a Proxmox-style `configdrive2` cloud-init drive, the console's Ansible configuration and Windows tests (details: [docs/windows-template.md](docs/windows-template.md#verification)).
+
+**Security**
+- The template steps created the WinRM certificate before sysprep, so every clone shared one private key. The template now only opens the firewall port; cloudbase-init creates a new certificate per clone (verified).
+- The unencrypted WinRM listener (5985) stayed active, so the Windows security baseline failed on every machine. The template steps now remove it on first boot (`LocalScripts`).
+
+**Fixes**
+- Validation took a link-local address (`169.254.x.x`, reported by Windows before DHCP answers) as the guest IP.
+- Validation reported Windows ready as soon as the guest agent answered, minutes before cloudbase-init set the password. It now also waits for WinRM HTTPS (5986).
+- Inside checks whose id was all digits (e.g. `00523341`) lost their result: Ansible turned the id into a number. Results are now matched by position.
+- The VM module sets the cloud-init format to `configdrive2` for Windows instead of relying on Proxmox's ostype default.
+
+**Tests**
+- `tofu test` for the VM module with a mocked provider (Windows/Linux settings, password and VMID preconditions), run in CI.
+- Backend tests for guest agent parsing, Windows readiness and result matching.
+
 ## 2.0.2 – 2026-10-18
 
 Results of an error and security review.
