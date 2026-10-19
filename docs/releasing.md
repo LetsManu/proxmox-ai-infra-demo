@@ -9,6 +9,7 @@ Releases are on the GitHub releases page of the repository. Each one has an inst
 |---|---|---|
 | `v2.1.0-rc.1` | Sign-in (OIDC, LDAP), roles, install/upgrade/backup scripts | `ghcr.io/letsmanu/proxmox-ai-infra-demo/{backend,frontend}:2.1.0-rc.1` |
 | `v2.0.3` | Windows Server verification and fixes | none (source release, build locally) |
+| `appliance-v1.0.0-rc.1` | Proxmox VM disk with console 2.1.0-rc.1 ([appliance.md](appliance.md)) | included in the disk |
 
 ## Versions
 
