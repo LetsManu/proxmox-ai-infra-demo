@@ -39,5 +39,9 @@ jobs:
       - name: GitHub release
         env: { COMMIT: "${{ inputs.commit }}" }
         run: |
-          if [ -n "$COMMIT" ]; then target=(--target "$(git rev-parse HEAD)"); else target=(--verify-tag); fi
-          gh release create "$TAG" "${target[@]}" --title "$TAG" --notes-file notes.md "$NAME.tar.gz" "$NAME.tar.gz.sha256"
+          if [ -n "$COMMIT" ]; then  # create the tag first: a refused push names the rule that blocks it
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              tag -a "$TAG" -m "$TAG" HEAD
+            git push origin "refs/tags/$TAG"
+          fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "$NAME.tar.gz" "$NAME.tar.gz.sha256"
