@@ -1,0 +1,39 @@
+# Publish a GitHub release for an existing tag without building images (source archive only),
+# e.g. for versions from before the image pipeline (release.yml). Run it from the Actions tab.
+name: Release from tag (source only)
+on:
+  workflow_dispatch:
+    inputs:
+      tag: { description: "Existing tag, e.g. v2.0.3", required: true }
+permissions: { contents: read }
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: "${{ inputs.tag }}" }
+      - name: Archive and notes
+        run: |
+          [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "Tag must be vX.Y.Z"; exit 1; }
+          version="${BASH_REMATCH[1]}"
+          name="proxmox-ai-infra-$version"
+          git archive --format=tar.gz --prefix="$name/" -o "$name.tar.gz" "$TAG"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          awk -v v="$version" '$0 ~ "^## " v " " {on=1; next} on && /^## / {exit} on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          Source release (no prebuilt images): extract, \`cp .env.example .env\`, then follow OVERVIEW.md and start with
+          \`docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d --build\`.
+          EOF
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - name: GitHub release
+        run: gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "$NAME.tar.gz" "$NAME.tar.gz.sha256"
