@@ -12,8 +12,8 @@ import threading
 import time
 
 from fastapi import HTTPException
-from ldap3 import ALL_ATTRIBUTES, SUBTREE, Connection, Server, Tls
-from ldap3.core.exceptions import LDAPBindError, LDAPException
+from ldap3 import SUBTREE, Connection, Server, Tls
+from ldap3.core.exceptions import LDAPBindError, LDAPException, LDAPInvalidCredentialsResult
 from ldap3.utils.conv import escape_filter_chars
 
 from ..config import Settings
@@ -75,18 +75,22 @@ def authenticate(settings: Settings, username: str, password: str) -> dict:
         svc = _connect(settings, server, settings.ldap_bind_dn or None,
                        settings.ldap_bind_password.get_secret_value() or None)
     except LDAPException as exc:
-        raise HTTPException(502, f"Cannot reach or bind to the directory: {exc.__class__.__name__}. "
-                                 "Check LDAP_URL, LDAP_BIND_DN and the bind password.") from exc
+        raise HTTPException(502, f"Cannot reach or bind to the directory: {exc.__class__.__name__}. Check LDAP_URL, "
+                                 "LDAP_BIND_DN and the bind password; for a certificate from an internal CA set "
+                                 "LDAP_CA_FILE.") from exc
     try:
         flt = settings.ldap_user_filter.replace("{username}", escape_filter_chars(username))
-        svc.search(settings.ldap_base_dn, flt, SUBTREE, attributes=ALL_ATTRIBUTES, size_limit=2)
+        # memberOf is operational on OpenLDAP: it is only returned when asked for by name
+        svc.search(settings.ldap_base_dn, flt, SUBTREE, size_limit=2,
+                   attributes=[settings.ldap_group_attribute, settings.ldap_display_name_attribute,
+                               settings.ldap_username_attribute])
         entries = [e for e in svc.response if e.get("type") == "searchResEntry"]
         if len(entries) != 1:
             raise _failed(key)  # unknown user or ambiguous filter: same answer as a wrong password
         dn, attrs = entries[0]["dn"], entries[0]["attributes"]
         try:
             _connect(settings, server, dn, password).unbind()
-        except LDAPBindError:
+        except (LDAPBindError, LDAPInvalidCredentialsResult):
             raise _failed(key) from None
         groups = [str(g) for g in _as_list(attrs.get(settings.ldap_group_attribute))]
         if settings.ldap_nested_groups:
@@ -100,8 +104,9 @@ def authenticate(settings: Settings, username: str, password: str) -> dict:
     with _lock:
         _failures.pop(key, None)
     display = _as_list(attrs.get(settings.ldap_display_name_attribute))
-    return {"username": username, "display_name": str(display[0]) if display else username,
-            "groups": sorted(set(groups))}
+    canonical = _as_list(attrs.get(settings.ldap_username_attribute))
+    name = str(canonical[0]) if canonical else username
+    return {"username": name, "display_name": str(display[0]) if display else name, "groups": sorted(set(groups))}
 
 
 def _as_list(value) -> list:

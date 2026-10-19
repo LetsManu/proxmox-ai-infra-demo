@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     ldap_group_attribute: str = "memberOf"
     ldap_nested_groups: bool = False  # Active Directory only: resolve nested groups (LDAP_MATCHING_RULE_IN_CHAIN)
     ldap_display_name_attribute: str = "displayName"
+    # recorded name: from the directory entry, so "anna" and "anna@corp.example" are the same person (four-eyes)
+    ldap_username_attribute: str = "sAMAccountName"  # OpenLDAP: uid, Authentik LDAP outpost: cn
 
     # --- Persistence ------------------------------------------------------
     database_url: str = "sqlite:////data/app.db"

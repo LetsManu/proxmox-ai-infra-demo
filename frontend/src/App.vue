@@ -59,7 +59,7 @@ onUnmounted(() => clearInterval(timer))
       <div v-if="store.me && !store.me.auth" class="callout warn boot" role="note">
         <span><strong>No sign-in configured.</strong> Everyone who can open this page acts as {{ store.me.username }} with every role. Set <code>AUTH_MODE=oidc</code> or <code>ldap</code> before others use the console (docs/authentication.md).</span>
       </div>
-      <div v-if="store.me?.auth && !hasRole('operator')" class="callout boot" role="note">
+      <div v-if="store.me?.auth && !hasRole('operator')" class="callout info boot" role="note">
         <span><strong>Read-only access.</strong> You can see everything; changes need the operator role, production approvals the approver role.</span>
       </div>
       <div v-if="store.loadError && !store.health" class="callout err boot" role="alert">

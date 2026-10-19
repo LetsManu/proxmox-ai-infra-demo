@@ -152,7 +152,7 @@ class FakeConn:
         elif "otto" in flt:
             self.response = [{"type": "searchResEntry", "dn": "CN=Otto,OU=Users,DC=corp,DC=example",
                               "attributes": {"memberOf": ["CN=Nested,OU=Groups,DC=corp,DC=example"],
-                                             "displayName": "Otto Operator"}}]
+                                             "displayName": "Otto Operator", "sAMAccountName": "otto"}}]
         else:
             self.response = []
 
@@ -169,12 +169,13 @@ def test_ldap_binds_as_user_and_resolves_nested_groups(monkeypatch):
     def fake_connect(settings, server, user, password):
         binds.append(user)
         if user == "CN=Otto,OU=Users,DC=corp,DC=example" and password != "right":
-            raise ldap_auth.LDAPBindError("invalid credentials")
+            raise ldap_auth.LDAPInvalidCredentialsResult("invalid credentials")
         return FakeConn(user, password)
 
     monkeypatch.setattr(ldap_auth, "_connect", fake_connect)
     s = get_settings()
     info = ldap_auth.authenticate(s, "otto", "right")
+    assert info["username"] == "otto"
     assert binds == ["CN=svc,DC=corp,DC=example", "CN=Otto,OU=Users,DC=corp,DC=example"]
     assert info["display_name"] == "Otto Operator"
     assert "CN=px-approvers,OU=Groups,DC=corp,DC=example" in info["groups"]  # nested via matching rule
