@@ -4,6 +4,8 @@
 #   CONSOLE_TLS=/certs/console.crt /certs/console.key   in .env
 {
 	admin off
+	# browsers send no SNI for an IP address; without this Caddy would not know which certificate to use
+	default_sni {$PUBLIC_HOST}
 }
 
 {$PUBLIC_HOST} {

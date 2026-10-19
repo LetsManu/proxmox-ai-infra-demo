@@ -24,6 +24,7 @@ Sign-in with your directory, and releases that install in a few minutes.
 - Separate appliance releases (`appliance-v<version>`, *Actions → Appliance release*) ship `proxmox-ai-infra-appliance-<version>.qcow2`: Debian 12 with Docker, a console release and its images, ready to import. `import-to-proxmox.sh` creates the VM on the node (VirtIO SCSI, guest agent, cloud-init user/SSH key/IP); `sudo pac-setup` on the VM configures Proxmox and sign-in.
 - Nothing is published on the network until sign-in is configured; then Caddy serves HTTPS (internal CA by default, your own certificate via `CONSOLE_TLS`).
 - Daily backup by cron, unattended security updates, SSH host keys and machine ID regenerated per VM.
+- Boot-tested like a Proxmox import (docs/appliance.md#what-was-tested). Fixes from that run that also apply to normal installs: the backend health check uses `curl` with a 10 s timeout and 60 s start period (a Python health check timed out on slow hosts and stopped `docker compose up`); `install.sh --non-interactive` now applies the given answers when `.env` already exists.
 
 **Upgrading from 2.0.x**
 - Two new secret files: `secrets/oidc_client_secret` and `secrets/ldap_bind_password` (empty if unused). `scripts/upgrade.sh` creates them.

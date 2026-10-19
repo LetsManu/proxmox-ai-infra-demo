@@ -84,10 +84,29 @@ as described in [configuration.md](configuration.md), then restart the service.
 
 A Proxmox snapshot before `pac-setup` changes or upgrades is a cheap way back.
 
+## What was tested
+
+On 2026-10-19 a disk built by `appliance/build.sh` (console 2.1.0, QEMU without KVM) was booted the way Proxmox runs
+the imported VM: q35, VirtIO SCSI disk grown to 32 GB, cloud-init drive as SATA CD-ROM with user `admin`, SSH key and
+DHCP, guest agent channel. Checked:
+
+- cloud-init: hostname, user with key-only SSH, disk grown; new machine ID and SSH host keys; the build-only CA is gone.
+- `proxmox-ai-infra.service` starts backend and frontend after boot and after a reboot; only `127.0.0.1:8080` listens.
+- `sudo pac-setup --non-interactive` with LDAP: `PUBLIC_URL=https://<vm-ip>`, Caddy on 443 (internal CA, IP
+  certificate), HTTP redirects to HTTPS, the API answers 401 without a session, sign-in reaches the directory;
+  switching back to `AUTH_MODE=none` closes 443/80 again.
+- `scripts/backup.sh` and the cron entry; the QEMU guest agent reports OS and IP.
+
+Found and fixed on the way: the `genericcloud` kernel does not see a cloud-init CD-ROM on the q35 SATA controller
+(the disk now uses Debian's `generic` image); the backend health check timed out on a slow host and stopped the start
+(now `curl`, 10 s timeout, 60 s start period, the service retries); `pac-setup --non-interactive` ignored answers when
+`.env` existed; browsers send no SNI for an IP address, so Caddy needs `default_sni`.
+
 ## How the disk is built
 
 `appliance/build.sh <console-version> <out.qcow2>` (run by the *Appliance release* workflow, see
-[releasing.md](releasing.md#appliance-releases)): downloads the Debian 12 generic cloud image
+[releasing.md](releasing.md#appliance-releases)): downloads the Debian 12 `generic` cloud image (full kernel; the
+`genericcloud` kernel misses the SATA CD-ROM Proxmox uses for cloud-init on q35)
 and checks it against Debian's `SHA512SUMS`, boots it once in QEMU with a cloud-init seed that runs
 `appliance/provision.sh` (Docker from Docker's apt repository, `docker load` of the images, the console under
 `/opt/proxmox-ai-infra`, the systemd service, cron backup), then seals it: SSH host keys, machine ID and cloud-init

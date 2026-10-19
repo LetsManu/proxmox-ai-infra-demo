@@ -38,11 +38,12 @@ services:
       # Bound to localhost only; the browser talks to the API through the frontend proxy.
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
+      # curl, not a Python process: a cold interpreter alone can take seconds on a busy or slow host
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8000/api/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 10s
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
