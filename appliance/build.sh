@@ -8,6 +8,7 @@
 #   IMAGE_REGISTRY  images to export (default ghcr.io/letsmanu/proxmox-ai-infra-demo); they must exist locally
 #   CADDY_IMAGE     default caddy:2.10.2-alpine
 #   EXTRA_CA_FILE   CA bundle the build VM must trust (TLS-intercepting proxy); removed again before the image is sealed
+#   QEMU_EXTRA      extra QEMU arguments for debugging, e.g. "-vnc 127.0.0.1:1"
 set -euo pipefail
 VERSION=${1:?version}; OUT=${2:?output.qcow2}
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(dirname "$HERE")
@@ -39,6 +40,7 @@ printf 'instance-id: pac-build\nlocal-hostname: proxmox-ai-infra\n' > "$WORK/see
 {
   echo "#cloud-config"
   echo "growpart: {mode: auto, devices: ['/']}"
+  echo "bootcmd: [[sh, -c, 'echo PAC-BUILD: cloud-init running > /dev/ttyS0']]"
   if [ -n "${EXTRA_CA_FILE:-}" ]; then
     echo "write_files:"
     echo "  - path: /usr/local/share/ca-certificates/build-extra-ca.crt"
@@ -62,7 +64,7 @@ timeout 7200 qemu-system-x86_64 -machine q35 -accel "$accel" -cpu max -smp 4 -m 
   -drive file="$WORK/seed.iso",media=cdrom,readonly=on \
   -drive file="$WORK/data.iso",media=cdrom,readonly=on \
   -netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-  -serial file:"$WORK/serial.log" -monitor none -display none
+  -serial file:"$WORK/serial.log" -monitor none -display none ${QEMU_EXTRA:-}
 grep -a "PAC-BUILD" "$WORK/serial.log" | tr -d '\r' || true
 grep -aq "PAC-BUILD-OK" "$WORK/serial.log" || { echo "Provisioning failed (see above)"; exit 1; }
 
