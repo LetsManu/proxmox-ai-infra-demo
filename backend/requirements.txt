@@ -1,8 +1,8 @@
-fastapi==0.146.0
+fastapi==0.162.0
 uvicorn[standard]==0.54.0
 pydantic==2.14.1
-pydantic-settings==2.16.0
-SQLAlchemy==2.1.5
+pydantic-settings==2.16.2
+SQLAlchemy==2.1.6
 httpx==0.28.1
 anthropic==1.15.0
 ansible-core==2.21.5
